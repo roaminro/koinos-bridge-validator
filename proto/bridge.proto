@@ -7,23 +7,16 @@ message metadata {
     string last_ethereum_block_parsed = 1;
 }
 
-message eth_transaction {
-    string id = 1;
-    string from = 2;
-    string token = 3;
-    string amount = 4;
-    string recipient = 5;
-    repeated string signatures = 6;
-}
-
-message koinos_transaction {
+message transaction {
     string id = 1;
     string op_id = 2;
     string from = 3;
-    string token = 4;
-    string amount = 5;
-    string recipient = 6;
-    repeated string signatures = 7;
+    string eth_token = 4;
+    string koinos_token = 5;
+    string amount = 6;
+    string recipient = 7;
+    string hash = 8;
+    repeated string signatures = 9;
 }
 
 enum action_id {
@@ -38,7 +31,7 @@ enum action_id {
     complete_transfer = 8;
 }
 
-  message complete_transfer_hash {
+message complete_transfer_hash {
     action_id action = 1;
     bytes transaction_id = 2;
     bytes token = 3;

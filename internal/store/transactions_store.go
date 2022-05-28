@@ -8,18 +8,18 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// KoinosTransactionsStore contains a backend object and handles requests
-type KoinosTransactionsStore struct {
+// TransactionsStore contains a backend object and handles requests
+type TransactionsStore struct {
 	backend Backend
 	rwmutex sync.RWMutex
 }
 
-// NewKoinosTransactionsStore creates a new KoinosTransactionsStore wrapping the provided backend
-func NewKoinosTransactionsStore(backend Backend) *KoinosTransactionsStore {
-	return &KoinosTransactionsStore{backend: backend}
+// NewTransactionsStore creates a new TransactionsStore wrapping the provided backend
+func NewTransactionsStore(backend Backend) *TransactionsStore {
+	return &TransactionsStore{backend: backend}
 }
 
-func (handler *KoinosTransactionsStore) Put(key string, transaction *bridge_pb.KoinosTransaction) error {
+func (handler *TransactionsStore) Put(key string, transaction *bridge_pb.Transaction) error {
 	handler.rwmutex.Lock()
 	defer handler.rwmutex.Unlock()
 
@@ -36,7 +36,7 @@ func (handler *KoinosTransactionsStore) Put(key string, transaction *bridge_pb.K
 	return nil
 }
 
-func (handler *KoinosTransactionsStore) Get(key string) (*bridge_pb.KoinosTransaction, error) {
+func (handler *TransactionsStore) Get(key string) (*bridge_pb.Transaction, error) {
 	handler.rwmutex.RLock()
 	defer handler.rwmutex.RUnlock()
 
@@ -46,7 +46,7 @@ func (handler *KoinosTransactionsStore) Get(key string) (*bridge_pb.KoinosTransa
 	}
 
 	if len(itemBytes) != 0 {
-		item := &bridge_pb.KoinosTransaction{}
+		item := &bridge_pb.Transaction{}
 		if err := proto.Unmarshal(itemBytes, item); err != nil {
 			return nil, fmt.Errorf("%w, %v", ErrDeserialization, err)
 		}

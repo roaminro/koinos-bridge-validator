@@ -146,6 +146,17 @@ func main() {
 	*validators = koinosUtil.GetStringSliceOption(validatorsOption, *validators, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.KoinosBridge, yamlConfig.Global)
 
+	tokenAddresses := make(map[string]string)
+
+	for _, tokensStr := range *tokenAddressesArr {
+		// first element is Koin token address
+		// second element is Ethereum token address
+		tokens := strings.Split(tokensStr, ":")
+
+		tokenAddresses[tokens[0]] = tokens[1]
+		tokenAddresses[tokens[1]] = tokens[0]
+	}
+
 	appID := fmt.Sprintf("%s.%s", appName, *instanceID)
 
 	// Initialize logger
@@ -155,7 +166,7 @@ func main() {
 		panic(fmt.Sprintf("Invalid log-level: %s. Please choose one of: debug, info, warn, error", *logLevel))
 	}
 
-	// meta store
+	// metadata store
 	metadataDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "metadata")
 	koinosUtil.EnsureDir(metadataDbDir)
 	log.Infof("Opening database at %s", metadataDbDir)
@@ -177,7 +188,7 @@ func main() {
 	var koinosDbBackend = store.NewBadgerBackend(koinosDbOpts)
 	defer koinosDbBackend.Close()
 
-	// koinosTxStore := store.NewKoinosTransactionsStore(koinosDbBackend)
+	// koinosTxStore := store.NewTransactionsStore(koinosDbBackend)
 
 	// ethereum transactions store
 	ethDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "ethereum_transactions")
@@ -189,7 +200,7 @@ func main() {
 	var ethDbBackend = store.NewBadgerBackend(ethDbOpts)
 	defer ethDbBackend.Close()
 
-	// ethTxStore := store.NewEthTransactionsStore(ethDbBackend)
+	ethTxStore := store.NewTransactionsStore(ethDbBackend)
 
 	// Reset backend if requested
 	if *reset {
@@ -226,7 +237,7 @@ func main() {
 
 	log.Infof("LastEthereumBlockParsed %s", metadata.LastEthereumBlockParsed)
 
-	// AMQP
+	// AMQP init
 	client := koinosmq.NewClient(*amqp, koinosmq.ExponentialBackoff)
 	requestHandler := koinosmq.NewRequestHandler(*amqp)
 
@@ -253,6 +264,8 @@ func main() {
 		}
 	}
 
+	// blockchains streaming
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	if *ethRPC != "none" {
@@ -268,6 +281,8 @@ func main() {
 			*noP2P,
 			*koinosPK,
 			*koinosContract,
+			tokenAddresses,
+			ethTxStore,
 		)
 	}
 
@@ -357,6 +372,8 @@ func streamEthereumBlocks(
 	noP2P bool,
 	koinosPKStr string,
 	koinosContractStr string,
+	tokenAddresses map[string]string,
+	ethTxStore *store.TransactionsStore,
 ) {
 	koinosPK, err := koinosUtil.DecodeWIF(koinosPKStr)
 
@@ -364,9 +381,15 @@ func streamEthereumBlocks(
 		panic(err)
 	}
 
-	definition := `[{
+	eventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
+		  {
+			"indexed": false,
+			"internalType": "address",
+			"name": "from",
+			"type": "address"
+		  },
 		  {
 			"indexed": false,
 			"internalType": "address",
@@ -375,22 +398,22 @@ func streamEthereumBlocks(
 		  },
 		  {
 			"indexed": false,
-			"internalType": "string",
-			"name": "recipient",
-			"type": "string"
-		  },
-		  {
-			"indexed": false,
 			"internalType": "uint256",
 			"name": "amount",
 			"type": "uint256"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "string",
+			"name": "recipient",
+			"type": "string"
 		  }
 		],
 		"name": "LogTokensLocked",
 		"type": "event"
 	  }]`
 
-	contractAbi, err := abi.JSON(strings.NewReader(definition))
+	eventAbi, err := abi.JSON(strings.NewReader(eventAbiStr))
 
 	if err != nil {
 		panic(err)
@@ -478,23 +501,27 @@ func streamEthereumBlocks(
 				}
 
 				for _, vLog := range logs {
+					// parse event
 					event := struct {
 						Token     common.Address
+						From      common.Address
 						Recipient string
 						Amount    *big.Int
 					}{}
 
-					err := contractAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
+					err := eventAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
 					if err != nil {
 						panic(err)
 					}
 
 					blockNumber := fmt.Sprint(vLog.BlockNumber)
 					txId := vLog.TxHash.Bytes()
+					txIdHex := vLog.TxHash.Hex()
+					ethFrom := event.From.Hex()
 					ethToken := event.Token.Hex()
 					amount := event.Amount.Uint64()
 
-					koinosToken, err := base58.Decode("19JntSm8pSNETT9aHTwAUHC5RMoaSmgZPJ")
+					koinosToken, err := base58.Decode(tokenAddresses[ethToken])
 					if err != nil {
 						panic(err)
 					}
@@ -509,8 +536,9 @@ func streamEthereumBlocks(
 						panic(err)
 					}
 
-					log.Infof("new Eth event | block: %s | tx: %s | token: %s | recipient: %s | amount: %s ", blockNumber, vLog.TxHash.Hex(), ethToken, event.Recipient, event.Amount.String())
+					log.Infof("new Eth event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
 
+					// sign the event
 					completeTransferHash := &bridge_pb.CompleteTransferHash{
 						Action:        bridge_pb.ActionId_complete_transfer,
 						TransactionId: txId,
@@ -526,16 +554,46 @@ func streamEthereumBlocks(
 					}
 
 					hash := sha256.Sum256(completeTransferHashBytes)
+					hashB64 := base64.StdEncoding.EncodeToString(hash[:])
 
 					sigBytes := signKoinosHash(koinosPK, hash[:])
+					sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
 
-					sEnc := base64.StdEncoding.EncodeToString(sigBytes)
-					fmt.Println(sEnc)
+					// store the event
+					ethTx, err := ethTxStore.Get(txIdHex)
+					if err != nil {
+						panic(err)
+					}
+
+					if ethTx == nil {
+						ethTx = &bridge_pb.Transaction{}
+					} else {
+						if ethTx.Hash != hashB64 {
+							log.Warnf("the calulated hash for tx %s is different than the one already received received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
+						}
+						ethTx.Signatures = append(ethTx.Signatures, sigB64)
+					}
+
+					ethTx.Id = txIdHex
+					ethTx.From = ethFrom
+					ethTx.EthToken = ethToken
+					ethTx.KoinosToken = tokenAddresses[ethToken]
+					ethTx.Amount = event.Amount.String()
+					ethTx.Recipient = event.Recipient
+					ethTx.Hash = hashB64
+
+					ethTxStore.Put(txIdHex, ethTx)
 
 					if !noP2P {
-						pluginBroadcast := &broadcast.PluginBroadcast{
-							Data: []byte(fmt.Sprint(time.Now().UnixNano())),
+						ethTxBytes, err := proto.Marshal(ethTx)
+						if err != nil {
+							panic(err)
 						}
+
+						pluginBroadcast := &broadcast.PluginBroadcast{
+							Data: ethTxBytes,
+						}
+
 						bytes, err := proto.Marshal(pluginBroadcast)
 
 						if err != nil {
@@ -548,7 +606,12 @@ func streamEthereumBlocks(
 					lastEthereumBlockParsed = vLog.BlockNumber
 				}
 
-				fromBlock = lastEthereumBlockParsed + 1
+				if len(logs) == 0 {
+					// if no logs available
+					fromBlock = toBlock + 1
+				} else {
+					fromBlock = lastEthereumBlockParsed + 1
+				}
 			} else {
 				log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
 			}
