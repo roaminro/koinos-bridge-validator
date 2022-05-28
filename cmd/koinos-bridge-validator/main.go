@@ -10,14 +10,12 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/dgraph-io/badger/v3"
 	koinosmq "github.com/koinos/koinos-mq-golang"
 	"github.com/koinos/koinos-proto-golang/koinos/broadcast"
-	"github.com/koinos/koinos-proto-golang/koinos/rpc"
 	prpc "github.com/koinos/koinos-proto-golang/koinos/rpc"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/block_store"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/p2p"
@@ -29,7 +27,6 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	log "github.com/koinos/koinos-log-golang"
@@ -39,31 +36,45 @@ import (
 )
 
 const (
-	basedirOption          = "basedir"
-	amqpOption             = "amqp"
-	instanceIDOption       = "instance-id"
-	logLevelOption         = "log-level"
-	resetOption            = "reset"
-	ethRPCOption           = "eth-rpc"
-	ethContractOption      = "eth-contract"
-	ethBlockStartOption    = "eth-block-start"
-	ethPKOption            = "eth-pk"
-	koinosContractOption   = "koinos-contract"
-	koinosBlockStartOption = "koinos-block-start"
-	koinosPKOption         = "koinos-pk"
-	validatorsOption       = "validators"
-	tokensAddressesOption  = "token-addresses"
+	basedirOption    = "basedir"
+	amqpOption       = "amqp"
+	instanceIDOption = "instance-id"
+	logLevelOption   = "log-level"
+	resetOption      = "reset"
+	noP2POption      = "no-p2p"
+
+	ethRPCOption               = "eth-rpc"
+	ethContractOption          = "eth-contract"
+	ethLogsTopicOption         = "eth-logs-topic"
+	ethBlockStartOption        = "eth-block-start"
+	ethPKOption                = "eth-pk"
+	ethMaxBlocksToStreamOption = "eth-max-blocks-stream"
+
+	koinosContractOption          = "koinos-contract"
+	koinosBlockStartOption        = "koinos-block-start"
+	koinosPKOption                = "koinos-pk"
+	koinosMaxBlocksToStreamOption = "koinos-max-blocks-stream"
+
+	validatorsOption      = "validators"
+	tokensAddressesOption = "token-addresses"
 )
 
 const (
-	basedirDefault          = ".koinos-bridge"
-	amqpDefault             = "amqp://guest:guest@localhost:5672/"
-	instanceIDDefault       = ""
-	logLevelDefault         = "info"
-	resetDefault            = false
-	ethRPCDefault           = "http://127.0.0.1:8545/"
-	ethBlockStartDefault    = "0"
-	koinosBlockStartDefault = "0"
+	basedirDefault    = ".koinos-bridge"
+	amqpDefault       = "amqp://guest:guest@localhost:5672/"
+	instanceIDDefault = ""
+	logLevelDefault   = "info"
+	resetDefault      = false
+	noP2PDefault      = false
+
+	ethRPCDefault               = "http://127.0.0.1:8545/"
+	ethBlockStartDefault        = "0"
+	ethMaxBlocksToStreamDefault = "1000"
+
+	koinosBlockStartDefault        = "0"
+	koinosMaxBlocksToStreamDefault = "1000"
+
+	emptyDefault = ""
 )
 
 const (
@@ -74,22 +85,26 @@ const (
 
 func main() {
 	var baseDir = flag.StringP(basedirOption, "d", basedirDefault, "the base directory")
-	var amqp = flag.StringP(amqpOption, "a", "", "AMQP server URL")
-	var reset = flag.BoolP("reset", "r", false, "reset the database")
+	var amqp = flag.StringP(amqpOption, "a", amqpDefault, "AMQP server URL")
+	var reset = flag.BoolP(resetOption, "r", resetDefault, "reset the database")
+	var noP2P = flag.BoolP(noP2POption, "b", noP2PDefault, "disable P2P")
 	instanceID := flag.StringP(instanceIDOption, "i", instanceIDDefault, "The instance ID to identify this service")
-	logLevel := flag.StringP(logLevelOption, "v", logLevelDefault, "The log filtering level (debug, info, warn, error)")
+	logLevel := flag.StringP(logLevelOption, "l", logLevelDefault, "The log filtering level (debug, info, warn, error)")
 
 	ethRPC := flag.StringP(ethRPCOption, "e", ethRPCDefault, "The url of the Ethereum RPC")
-	ethContract := flag.StringP(ethContractOption, "c", "", "The address of the Ethereum bridge contract")
+	ethContract := flag.StringP(ethContractOption, "c", emptyDefault, "The address of the Ethereum bridge contract")
+	ethLogsTopic := flag.StringP(ethLogsTopicOption, "n", emptyDefault, "The topic to use when strea;ing the Ethereum contract logs")
 	ethBlockStart := flag.StringP(ethBlockStartOption, "t", ethBlockStartDefault, "The block from where to start the Ethereum blockchain streaming")
-	ethPK := flag.StringP(ethPKOption, "p", "", "The private key to use to sign Ethereum related transfers")
+	ethPK := flag.StringP(ethPKOption, "p", emptyDefault, "The private key to use to sign Ethereum related transfers")
+	ethMaxBlocksToStream := flag.StringP(ethMaxBlocksToStreamOption, "f", ethMaxBlocksToStreamDefault, "The maximum number of blocks to retrieve during Ethereum blockchain streaming")
 
-	koinosContract := flag.StringP(koinosContractOption, "k", "", "The address of the Koinos bridge contract")
+	koinosContract := flag.StringP(koinosContractOption, "k", emptyDefault, "The address of the Koinos bridge contract")
 	koinosBlockStart := flag.StringP(koinosBlockStartOption, "o", koinosBlockStartDefault, "The block from where to start the Koinos blockchain streaming")
-	koinosPK := flag.StringP(koinosPKOption, "w", "", "The private key to use to sign Koinos related transfers")
+	koinosPK := flag.StringP(koinosPKOption, "w", emptyDefault, "The private key to use to sign Koinos related transfers")
+	koinosMaxBlocksToStream := flag.StringP(koinosMaxBlocksToStreamOption, "g", koinosMaxBlocksToStreamDefault, "The maximum number of blocks to retrieve during Koinos blockchain streaming")
 
 	validators := flag.StringSliceP(validatorsOption, "v", []string{}, "Koinos Addresses of the validators")
-	tokenAddressesArr := flag.StringSliceP(tokensAddressesOption, "v", []string{}, "Addresses of the tokens supported by the bridge in the foram KOIN_TOKEN_ADDRRESS1:ETH_TOKEN_ADDRRESS1")
+	tokenAddressesArr := flag.StringSliceP(tokensAddressesOption, "s", []string{}, "Addresses of the tokens supported by the bridge in the foram KOIN_TOKEN_ADDRRESS1:ETH_TOKEN_ADDRRESS1")
 
 	flag.Parse()
 
@@ -105,15 +120,19 @@ func main() {
 	*logLevel = koinosUtil.GetStringOption(logLevelOption, logLevelDefault, *logLevel, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*instanceID = koinosUtil.GetStringOption(instanceIDOption, koinosUtil.GenerateBase58ID(5), *instanceID, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*reset = koinosUtil.GetBoolOption(resetOption, resetDefault, *reset, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*noP2P = koinosUtil.GetBoolOption(noP2POption, noP2PDefault, *noP2P, yamlConfig.KoinosBridge, yamlConfig.Global)
 
 	*ethRPC = koinosUtil.GetStringOption(ethRPCOption, ethRPCDefault, *ethRPC, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethContract = koinosUtil.GetStringOption(ethContractOption, "", *ethContract, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, "", *ethBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethPK = koinosUtil.GetStringOption(ethPKOption, "", *ethPK, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethContract = koinosUtil.GetStringOption(ethContractOption, emptyDefault, *ethContract, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethLogsTopic = koinosUtil.GetStringOption(*ethLogsTopic, emptyDefault, *ethLogsTopic, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, ethBlockStartDefault, *ethBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethPK = koinosUtil.GetStringOption(ethPKOption, emptyDefault, *ethPK, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethMaxBlocksToStream = koinosUtil.GetStringOption(ethMaxBlocksToStreamOption, ethMaxBlocksToStreamDefault, *ethMaxBlocksToStream, yamlConfig.KoinosBridge, yamlConfig.Global)
 
-	*koinosContract = koinosUtil.GetStringOption(koinosContractOption, "", *koinosContract, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*koinosBlockStart = koinosUtil.GetStringOption(koinosBlockStartOption, "", *koinosBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, "", *koinosPK, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*koinosContract = koinosUtil.GetStringOption(koinosContractOption, emptyDefault, *koinosContract, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*koinosBlockStart = koinosUtil.GetStringOption(koinosBlockStartOption, emptyDefault, *koinosBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, emptyDefault, *koinosPK, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*koinosMaxBlocksToStream = koinosUtil.GetStringOption(koinosMaxBlocksToStreamOption, koinosMaxBlocksToStreamDefault, *koinosMaxBlocksToStream, yamlConfig.KoinosBridge, yamlConfig.Global)
 
 	*validators = koinosUtil.GetStringSliceOption(validatorsOption, *validators, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.KoinosBridge, yamlConfig.Global)
@@ -149,7 +168,7 @@ func main() {
 	var koinosDbBackend = store.NewBadgerBackend(koinosDbOpts)
 	defer koinosDbBackend.Close()
 
-	koinosTxStore := store.NewKoinosTransactionsStore(koinosDbBackend)
+	// koinosTxStore := store.NewKoinosTransactionsStore(koinosDbBackend)
 
 	// ethereum transactions store
 	ethDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "ethereum_transactions")
@@ -161,7 +180,7 @@ func main() {
 	var ethDbBackend = store.NewBadgerBackend(ethDbOpts)
 	defer ethDbBackend.Close()
 
-	ethTxStore := store.NewEthTransactionsStore(ethDbBackend)
+	// ethTxStore := store.NewEthTransactionsStore(ethDbBackend)
 
 	// Reset backend if requested
 	if *reset {
@@ -212,73 +231,50 @@ func main() {
 
 	log.Info("request handler started")
 
-	log.Info("Attempting to connect to p2p...")
-	for {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		val, _ := IsConnectedToP2P(ctx, client)
-		if val {
-			log.Info("Connected to P2P")
-			break
+	if !*noP2P {
+		log.Info("Attempting to connect to p2p...")
+		for {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			val, _ := IsConnectedToP2P(ctx, client)
+			if val {
+				log.Info("Connected to P2P")
+				break
+			}
 		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	wg := &sync.WaitGroup{}
-
-	logsChan := make(chan types.Log, 10)
-
-	startBlock, err := strconv.ParseUint(metadata.LastEthereumBlockParsed, 0, 64)
-
-	if err != nil {
-		panic(err)
-	}
-
-	startBlock++
 
 	if *ethRPC != "none" {
-		go fetchLogs(ctx, logsChan, startBlock, *ethRPC)
+		go streamEthereumBlocks(
+			ctx,
+			client,
+			metadataStore,
+			metadata.LastEthereumBlockParsed,
+			*ethRPC,
+			*ethContract,
+			*ethLogsTopic,
+			*ethMaxBlocksToStream,
+			*noP2P,
+		)
 	}
-
-	wg.Add(1)
-	go processLogs(wg, logsChan, metadataStore, client)
 
 	// Wait for a SIGINT or SIGTERM signal
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
-	log.Info("closing")
+	log.Info("closing service gracefully")
 	cancel()
-	wg.Wait()
 	log.Info("graceful stop completed")
 }
 
-func handleRPC(rpcType string, data []byte) ([]byte, error) {
-	req := &rpcplugin.PluginRequest{}
-	resp := &rpcplugin.PluginResponse{}
-
-	err := proto.Unmarshal(data, req)
-	if err != nil {
-		log.Warnf("Received malformed request: 0x%v", hex.EncodeToString(data))
-		eResp := prpc.ErrorResponse{Message: err.Error()}
-		rErr := rpcplugin.PluginResponse_Error{Error: &eResp}
-		resp.Response = &rErr
-	} else {
-		log.Infof("Received RPC request: 0x%v", hex.EncodeToString(data))
-	}
-
-	var outputBytes []byte
-	outputBytes, err = proto.Marshal(resp)
-
-	return outputBytes, err
-}
-
-// IsConnectedToBlockStore returns if the AMQP connection can currently communicate
-// with the block store microservice.
+// IsConnectedToP2P returns if the AMQP connection can currently communicate
+// with the P2P microservice.
 func IsConnectedToP2P(ctx context.Context, client *koinosmq.Client) (bool, error) {
 	args := &p2p.P2PRequest{
 		Request: &p2p.P2PRequest_Reserved{
-			Reserved: &rpc.ReservedRpc{},
+			Reserved: &prpc.ReservedRpc{},
 		},
 	}
 
@@ -305,28 +301,38 @@ func IsConnectedToP2P(ctx context.Context, client *koinosmq.Client) (bool, error
 	return true, nil
 }
 
-func testLoop(ctx context.Context, client *koinosmq.Client) {
-	for {
-		select {
-		case <-time.After(time.Second * 5):
-			fmt.Println("going to broadcast")
-			pluginBroadcast := &broadcast.PluginBroadcast{}
-			data, err := proto.Marshal(pluginBroadcast)
-			if err != nil {
-				fmt.Printf("could not serialize %s", err)
-			}
-			err = client.Broadcast("application/octet-stream", "plugin.bridge", data)
-			if err != nil {
-				fmt.Printf("could not broadcast %s", err)
-			}
-			fmt.Println("broadcasted")
-		case <-ctx.Done():
-			return
-		}
+func handleRPC(rpcType string, data []byte) ([]byte, error) {
+	req := &rpcplugin.PluginRequest{}
+	resp := &rpcplugin.PluginResponse{}
+
+	err := proto.Unmarshal(data, req)
+	if err != nil {
+		log.Warnf("Received malformed request: 0x%v", hex.EncodeToString(data))
+		eResp := prpc.ErrorResponse{Message: err.Error()}
+		rErr := rpcplugin.PluginResponse_Error{Error: &eResp}
+		resp.Response = &rErr
+	} else {
+		log.Infof("Received RPC request: 0x%v", hex.EncodeToString(data))
+		// TODO: handle RPC request
 	}
+
+	var outputBytes []byte
+	outputBytes, err = proto.Marshal(resp)
+
+	return outputBytes, err
 }
 
-func fetchLogs(ctx context.Context, ch chan<- types.Log, startBlock uint64, ethRPC string) {
+func streamEthereumBlocks(
+	ctx context.Context,
+	mqClient *koinosmq.Client,
+	metadataStore *store.MetadataStore,
+	savedLastEthereumBlockParsed string,
+	ethRPC string,
+	ethContract string,
+	ethLogsTopic string,
+	ethMaxBlocksToStreamStr string,
+	noP2P bool,
+) {
 	ethCl, err := ethclient.Dial(ethRPC)
 
 	if err != nil {
@@ -337,20 +343,39 @@ func fetchLogs(ctx context.Context, ch chan<- types.Log, startBlock uint64, ethR
 
 	fmt.Println("connected to Ethereum RPC")
 
-	contractAddress := common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
-	topic := common.HexToHash("0xb656d86127d7832fca2f3d9b253a58f55cec150b88b33cf54c8c514ab7ea623e")
+	ethMaxBlocksToStream, err := strconv.ParseUint(ethMaxBlocksToStreamStr, 0, 64)
+	if err != nil {
+		panic(err)
+	}
 
-	fromBlock := int64(startBlock)
-	toBlock := fromBlock + 1
+	startBlock, err := strconv.ParseUint(savedLastEthereumBlockParsed, 0, 64)
+	if err != nil {
+		panic(err)
+	}
+
+	startBlock++
+
+	contractAddress := common.HexToAddress(ethContract)
+	topic := common.HexToHash(ethLogsTopic)
+
+	var lastEthereumBlockParsed uint64
+	fromBlock := startBlock
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infof("stop fetching logs")
-			close(ch)
+			log.Infof("stop streaming logs")
+			metadata, err := metadataStore.Get()
+			if err != nil {
+				panic(err)
+			}
+
+			metadata.LastEthereumBlockParsed = strconv.FormatUint(lastEthereumBlockParsed, 10)
+
+			metadataStore.Put(metadata)
 			return
 
-		case <-time.After(time.Second * 1):
+		case <-time.After(time.Millisecond * 1000):
 			latestblock, err := ethCl.BlockNumber(ctx)
 
 			if err != nil {
@@ -359,12 +384,22 @@ func fetchLogs(ctx context.Context, ch chan<- types.Log, startBlock uint64, ethR
 
 			log.Infof("latestblock: %d", latestblock)
 
-			if uint64(toBlock) <= latestblock {
+			var blockDelta uint64 = 0
+
+			if latestblock > fromBlock {
+				blockDelta = latestblock - fromBlock
+			}
+
+			var toBlock = fromBlock + blockDelta
+
+			if blockDelta > ethMaxBlocksToStream {
+				toBlock = fromBlock + ethMaxBlocksToStream
+			}
+
+			if toBlock <= latestblock {
 				query := ethereum.FilterQuery{
-					FromBlock: big.NewInt(fromBlock),
-					ToBlock:   big.NewInt(toBlock),
-					// FromBlock: big.NewInt(0),
-					// ToBlock:   big.NewInt(100),
+					FromBlock: big.NewInt(int64(fromBlock)),
+					ToBlock:   big.NewInt(int64(toBlock)),
 					Addresses: []common.Address{
 						contractAddress,
 					},
@@ -372,7 +407,7 @@ func fetchLogs(ctx context.Context, ch chan<- types.Log, startBlock uint64, ethR
 						{topic},
 					},
 				}
-				log.Infof("fetchLogs: %d - %d", fromBlock, toBlock)
+				log.Infof("fetched eth logs: %d - %d", fromBlock, toBlock)
 
 				logs, err := ethCl.FilterLogs(ctx, query)
 				if err != nil {
@@ -381,59 +416,30 @@ func fetchLogs(ctx context.Context, ch chan<- types.Log, startBlock uint64, ethR
 
 				for _, vLog := range logs {
 
-					// fmt.Println(vLog.BlockNumber)           // foo
-					// fmt.Println(string(vLog.Address.Hex())) // bar
-					// fmt.Println(vLog.Index)                 // bar
-					// fmt.Println(vLog.TxHash)                // bar
-					// fmt.Println(vLog.Topics)                // bar
-					ch <- vLog
+					log.Info(fmt.Sprint(vLog.BlockNumber))
+					log.Info(string(vLog.Address.Hex()))
+					log.Info(fmt.Sprint(vLog.Index))
+					log.Info(vLog.TxHash.Hex())
+
+					if !noP2P {
+						pluginBroadcast := &broadcast.PluginBroadcast{
+							Data: []byte(fmt.Sprint(time.Now().UnixNano())),
+						}
+						bytes, err := proto.Marshal(pluginBroadcast)
+
+						if err != nil {
+							panic(err)
+						}
+
+						mqClient.Broadcast("application/octet-stream", "plugin.bridge", bytes)
+					}
+
+					lastEthereumBlockParsed = vLog.BlockNumber
 				}
 
-				fromBlock++
-				toBlock++
+				fromBlock = lastEthereumBlockParsed + 1
 			} else {
-				log.Info("waiting for new block")
-			}
-		}
-	}
-}
-
-func processLogs(wg *sync.WaitGroup, ch <-chan types.Log, metaStore *store.MetadataStore, mqClient *koinosmq.Client) {
-	defer wg.Done()
-	var lastEthereumBlockParsed uint64
-
-	for {
-		select {
-		case vLog, ok := <-ch:
-			log.Info("receive for new logs")
-			if ok {
-				log.Info(fmt.Sprint(vLog.BlockNumber)) // foo
-				log.Info(string(vLog.Address.Hex()))   // bar
-				log.Info(fmt.Sprint(vLog.Index))       // bar
-				log.Info(vLog.TxHash.Hex())            // bar
-				// log.Info(vLog.Topics)                // bar
-				lastEthereumBlockParsed = vLog.BlockNumber
-				pluginBroadcast := &broadcast.PluginBroadcast{
-					Data: []byte(fmt.Sprint(time.Now().UnixNano())),
-				}
-				bytes, err := proto.Marshal(pluginBroadcast)
-
-				if err != nil {
-					panic(err)
-				}
-
-				mqClient.Broadcast("application/octet-stream", "plugin.bridge", bytes)
-			} else {
-				log.Info("stop processing new logs")
-				metadata, err := metaStore.Get()
-				if err != nil {
-					panic(err)
-				}
-
-				metadata.LastEthereumBlockParsed = strconv.FormatUint(lastEthereumBlockParsed, 10)
-
-				metaStore.Put(metadata)
-				return
+				log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
 			}
 		}
 	}
