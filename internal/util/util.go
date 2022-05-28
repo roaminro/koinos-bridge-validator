@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/btcsuite/btcd/btcec"
 	"gopkg.in/yaml.v2"
 )
 
@@ -43,4 +44,16 @@ func InitYamlConfig(baseDir string) *YamlConfig {
 	}
 
 	return &yamlConfig
+}
+
+func SignKoinosHash(key []byte, hash []byte) []byte {
+	privateKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), key)
+
+	// Sign the hash
+	signatureBytes, err := btcec.SignCompact(btcec.S256(), privateKey, hash, true)
+	if err != nil {
+		panic(err)
+	}
+
+	return signatureBytes
 }
