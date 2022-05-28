@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,22 +12,29 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/dgraph-io/badger/v3"
+	"github.com/mr-tron/base58"
+
 	koinosmq "github.com/koinos/koinos-mq-golang"
 	"github.com/koinos/koinos-proto-golang/koinos/broadcast"
 	prpc "github.com/koinos/koinos-proto-golang/koinos/rpc"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/block_store"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/p2p"
 	rpcplugin "github.com/koinos/koinos-proto-golang/koinos/rpc/plugin"
+
 	"github.com/roaminroe/koinos-bridge-validator/internal/store"
 	"github.com/roaminroe/koinos-bridge-validator/internal/util"
 	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -257,6 +266,8 @@ func main() {
 			*ethLogsTopic,
 			*ethMaxBlocksToStream,
 			*noP2P,
+			*koinosPK,
+			*koinosContract,
 		)
 	}
 
@@ -322,6 +333,18 @@ func handleRPC(rpcType string, data []byte) ([]byte, error) {
 	return outputBytes, err
 }
 
+func signKoinosHash(key []byte, hash []byte) []byte {
+	privateKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), key)
+
+	// Sign the hash
+	signatureBytes, err := btcec.SignCompact(btcec.S256(), privateKey, hash, true)
+	if err != nil {
+		panic(err)
+	}
+
+	return signatureBytes
+}
+
 func streamEthereumBlocks(
 	ctx context.Context,
 	mqClient *koinosmq.Client,
@@ -332,7 +355,47 @@ func streamEthereumBlocks(
 	ethLogsTopic string,
 	ethMaxBlocksToStreamStr string,
 	noP2P bool,
+	koinosPKStr string,
+	koinosContractStr string,
 ) {
+	koinosPK, err := koinosUtil.DecodeWIF(koinosPKStr)
+
+	if err != nil {
+		panic(err)
+	}
+
+	definition := `[{
+		"anonymous": false,
+		"inputs": [
+		  {
+			"indexed": false,
+			"internalType": "address",
+			"name": "token",
+			"type": "address"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "string",
+			"name": "recipient",
+			"type": "string"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "uint256",
+			"name": "amount",
+			"type": "uint256"
+		  }
+		],
+		"name": "LogTokensLocked",
+		"type": "event"
+	  }]`
+
+	contractAbi, err := abi.JSON(strings.NewReader(definition))
+
+	if err != nil {
+		panic(err)
+	}
+
 	ethCl, err := ethclient.Dial(ethRPC)
 
 	if err != nil {
@@ -415,11 +478,59 @@ func streamEthereumBlocks(
 				}
 
 				for _, vLog := range logs {
+					event := struct {
+						Token     common.Address
+						Recipient string
+						Amount    *big.Int
+					}{}
 
-					log.Info(fmt.Sprint(vLog.BlockNumber))
-					log.Info(string(vLog.Address.Hex()))
-					log.Info(fmt.Sprint(vLog.Index))
-					log.Info(vLog.TxHash.Hex())
+					err := contractAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
+					if err != nil {
+						panic(err)
+					}
+
+					blockNumber := fmt.Sprint(vLog.BlockNumber)
+					txId := vLog.TxHash.Bytes()
+					ethToken := event.Token.Hex()
+					amount := event.Amount.Uint64()
+
+					koinosToken, err := base58.Decode("19JntSm8pSNETT9aHTwAUHC5RMoaSmgZPJ")
+					if err != nil {
+						panic(err)
+					}
+
+					recipient, err := base58.Decode(event.Recipient)
+					if err != nil {
+						panic(err)
+					}
+
+					koinosContract, err := base58.Decode(koinosContractStr)
+					if err != nil {
+						panic(err)
+					}
+
+					log.Infof("new Eth event | block: %s | tx: %s | token: %s | recipient: %s | amount: %s ", blockNumber, vLog.TxHash.Hex(), ethToken, event.Recipient, event.Amount.String())
+
+					completeTransferHash := &bridge_pb.CompleteTransferHash{
+						Action:        bridge_pb.ActionId_complete_transfer,
+						TransactionId: txId,
+						Token:         koinosToken,
+						Recipient:     recipient,
+						Amount:        amount,
+						ContractId:    koinosContract,
+					}
+
+					completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
+					if err != nil {
+						panic(err)
+					}
+
+					hash := sha256.Sum256(completeTransferHashBytes)
+
+					sigBytes := signKoinosHash(koinosPK, hash[:])
+
+					sEnc := base64.StdEncoding.EncodeToString(sigBytes)
+					fmt.Println(sEnc)
 
 					if !noP2P {
 						pluginBroadcast := &broadcast.PluginBroadcast{

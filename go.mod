@@ -21,6 +21,7 @@ require (
 	github.com/dgraph-io/badger/v3 v3.2103.2
 	github.com/go-ole/go-ole v1.2.1 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
+	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/minio/blake2b-simd v0.0.0-20160723061019-3f5f724cb5b1 // indirect
