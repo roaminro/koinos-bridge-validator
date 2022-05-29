@@ -68,7 +68,7 @@ const (
 
 const (
 	pluginName = "plugin.bridge"
-	appName    = "koinos_bridge"
+	appName    = "bridge"
 	logDir     = "logs"
 )
 
@@ -223,7 +223,10 @@ func main() {
 
 	log.Infof("starting listening amqp server %s\n", *amqp)
 
-	requestHandler.SetRPCHandler(pluginName, rpc.HandleRPC)
+	requestHandler.SetRPCHandler(pluginName, rpc.P2PHandleRPC)
+	requestHandler.SetRPCHandler(appName, func(rpcType string, data []byte) ([]byte, error) {
+		return rpc.HandleRPC(rpcType, data, ethTxStore)
+	})
 
 	requestHandler.Start()
 

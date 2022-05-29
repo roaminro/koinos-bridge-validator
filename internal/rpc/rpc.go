@@ -8,8 +8,11 @@ import (
 
 	log "github.com/koinos/koinos-log-golang"
 	koinosmq "github.com/koinos/koinos-mq-golang"
+	"github.com/roaminroe/koinos-bridge-validator/internal/store"
+	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/koinos/koinos-proto-golang/koinos/rpc"
 	prpc "github.com/koinos/koinos-proto-golang/koinos/rpc"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/block_store"
 	"github.com/koinos/koinos-proto-golang/koinos/rpc/p2p"
@@ -48,7 +51,7 @@ func IsConnectedToP2P(ctx context.Context, client *koinosmq.Client) (bool, error
 	return true, nil
 }
 
-func HandleRPC(rpcType string, data []byte) ([]byte, error) {
+func P2PHandleRPC(rpcType string, data []byte) ([]byte, error) {
 	req := &rpcplugin.PluginRequest{}
 	resp := &rpcplugin.PluginResponse{}
 
@@ -67,4 +70,33 @@ func HandleRPC(rpcType string, data []byte) ([]byte, error) {
 	outputBytes, err = proto.Marshal(resp)
 
 	return outputBytes, err
+}
+
+func HandleRPC(rpcType string, data []byte, ethTxStore *store.TransactionsStore) ([]byte, error) {
+	request := &bridge_pb.BridgeRequest{}
+	response := &bridge_pb.BridgeResponse{}
+
+	err := proto.Unmarshal(data, request)
+
+	if err != nil {
+		log.Warnf("Received malformed request: %v", data)
+	} else {
+		log.Debugf("Received RPC request: %s", request.String())
+		switch v := request.Request.(type) {
+		case *bridge_pb.BridgeRequest_GetEthereumTransaction:
+			if transaction, err := ethTxStore.Get(v.GetEthereumTransaction.TransactionId); err == nil {
+				r := &bridge_pb.GetEthereumTransactionResponse{Transaction: transaction}
+				response.Response = &bridge_pb.BridgeResponse_GetEthereumTransaction{GetEthereumTransaction: r}
+			}
+		default:
+			err = errors.New("unknown request")
+		}
+	}
+
+	if err != nil {
+		e := &rpc.ErrorResponse{Message: string(err.Error())}
+		response.Response = &bridge_pb.BridgeResponse_Error{Error: e}
+	}
+
+	return proto.Marshal(response)
 }

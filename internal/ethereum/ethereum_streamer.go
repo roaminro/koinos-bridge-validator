@@ -234,6 +234,7 @@ func StreamEthereumBlocks(
 
 					if ethTx == nil {
 						ethTx = &bridge_pb.Transaction{}
+						ethTx.Signatures = []string{sigB64}
 					} else {
 						if ethTx.Hash != hashB64 {
 							log.Warnf("the calulated hash for tx %s is different than the one already received received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
