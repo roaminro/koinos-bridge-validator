@@ -49,7 +49,7 @@ const (
 )
 
 const (
-	basedirDefault    = ".koinos-bridge"
+	basedirDefault    = ".koinos"
 	amqpDefault       = "amqp://guest:guest@localhost:5672/"
 	instanceIDDefault = ""
 	logLevelDefault   = "info"
@@ -74,22 +74,22 @@ const (
 
 func main() {
 	var baseDir = flag.StringP(basedirOption, "d", basedirDefault, "the base directory")
-	var amqp = flag.StringP(amqpOption, "a", amqpDefault, "AMQP server URL")
+	var amqp = flag.StringP(amqpOption, "a", emptyDefault, "AMQP server URL")
 	var reset = flag.BoolP(resetOption, "r", resetDefault, "reset the database")
 	var noP2P = flag.BoolP(noP2POption, "b", noP2PDefault, "disable P2P")
 	instanceID := flag.StringP(instanceIDOption, "i", instanceIDDefault, "The instance ID to identify this service")
 	logLevel := flag.StringP(logLevelOption, "l", logLevelDefault, "The log filtering level (debug, info, warn, error)")
 
-	ethRPC := flag.StringP(ethRPCOption, "e", ethRPCDefault, "The url of the Ethereum RPC")
+	ethRPC := flag.StringP(ethRPCOption, "e", emptyDefault, "The url of the Ethereum RPC")
 	ethContract := flag.StringP(ethContractOption, "c", emptyDefault, "The address of the Ethereum bridge contract")
-	ethBlockStart := flag.StringP(ethBlockStartOption, "t", ethBlockStartDefault, "The block from where to start the Ethereum blockchain streaming")
+	ethBlockStart := flag.StringP(ethBlockStartOption, "t", emptyDefault, "The block from where to start the Ethereum blockchain streaming")
 	ethPK := flag.StringP(ethPKOption, "p", emptyDefault, "The private key to use to sign Ethereum related transfers")
-	ethMaxBlocksToStream := flag.StringP(ethMaxBlocksToStreamOption, "f", ethMaxBlocksToStreamDefault, "The maximum number of blocks to retrieve during Ethereum blockchain streaming")
+	ethMaxBlocksToStream := flag.StringP(ethMaxBlocksToStreamOption, "f", emptyDefault, "The maximum number of blocks to retrieve during Ethereum blockchain streaming")
 
 	koinosContract := flag.StringP(koinosContractOption, "k", emptyDefault, "The address of the Koinos bridge contract")
-	koinosBlockStart := flag.StringP(koinosBlockStartOption, "o", koinosBlockStartDefault, "The block from where to start the Koinos blockchain streaming")
+	koinosBlockStart := flag.StringP(koinosBlockStartOption, "o", emptyDefault, "The block from where to start the Koinos blockchain streaming")
 	koinosPK := flag.StringP(koinosPKOption, "w", emptyDefault, "The private key to use to sign Koinos related transfers")
-	koinosMaxBlocksToStream := flag.StringP(koinosMaxBlocksToStreamOption, "g", koinosMaxBlocksToStreamDefault, "The maximum number of blocks to retrieve during Koinos blockchain streaming")
+	koinosMaxBlocksToStream := flag.StringP(koinosMaxBlocksToStreamOption, "g", emptyDefault, "The maximum number of blocks to retrieve during Koinos blockchain streaming")
 
 	validators := flag.StringSliceP(validatorsOption, "v", []string{}, "Koinos Addresses of the validators")
 	tokenAddressesArr := flag.StringSliceP(tokensAddressesOption, "s", []string{}, "Addresses of the tokens supported by the bridge in the foram KOIN_TOKEN_ADDRRESS1:ETH_TOKEN_ADDRRESS1")
@@ -104,25 +104,25 @@ func main() {
 
 	yamlConfig := util.InitYamlConfig(*baseDir)
 
-	*amqp = koinosUtil.GetStringOption(amqpOption, amqpDefault, *amqp, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*logLevel = koinosUtil.GetStringOption(logLevelOption, logLevelDefault, *logLevel, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*instanceID = koinosUtil.GetStringOption(instanceIDOption, koinosUtil.GenerateBase58ID(5), *instanceID, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*reset = koinosUtil.GetBoolOption(resetOption, resetDefault, *reset, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*noP2P = koinosUtil.GetBoolOption(noP2POption, noP2PDefault, *noP2P, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*amqp = koinosUtil.GetStringOption(amqpOption, amqpDefault, *amqp, yamlConfig.Bridge, yamlConfig.Global)
+	*logLevel = koinosUtil.GetStringOption(logLevelOption, logLevelDefault, *logLevel, yamlConfig.Bridge, yamlConfig.Global)
+	*instanceID = koinosUtil.GetStringOption(instanceIDOption, koinosUtil.GenerateBase58ID(5), *instanceID, yamlConfig.Bridge, yamlConfig.Global)
+	*reset = koinosUtil.GetBoolOption(resetOption, resetDefault, *reset, yamlConfig.Bridge, yamlConfig.Global)
+	*noP2P = koinosUtil.GetBoolOption(noP2POption, noP2PDefault, *noP2P, yamlConfig.Bridge, yamlConfig.Global)
 
-	*ethRPC = koinosUtil.GetStringOption(ethRPCOption, ethRPCDefault, *ethRPC, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethContract = koinosUtil.GetStringOption(ethContractOption, emptyDefault, *ethContract, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, ethBlockStartDefault, *ethBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethPK = koinosUtil.GetStringOption(ethPKOption, emptyDefault, *ethPK, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethMaxBlocksToStream = koinosUtil.GetStringOption(ethMaxBlocksToStreamOption, ethMaxBlocksToStreamDefault, *ethMaxBlocksToStream, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*ethRPC = koinosUtil.GetStringOption(ethRPCOption, ethRPCDefault, *ethRPC, yamlConfig.Bridge, yamlConfig.Global)
+	*ethContract = koinosUtil.GetStringOption(ethContractOption, emptyDefault, *ethContract, yamlConfig.Bridge, yamlConfig.Global)
+	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, ethBlockStartDefault, *ethBlockStart, yamlConfig.Bridge, yamlConfig.Global)
+	*ethPK = koinosUtil.GetStringOption(ethPKOption, emptyDefault, *ethPK, yamlConfig.Bridge, yamlConfig.Global)
+	*ethMaxBlocksToStream = koinosUtil.GetStringOption(ethMaxBlocksToStreamOption, ethMaxBlocksToStreamDefault, *ethMaxBlocksToStream, yamlConfig.Bridge, yamlConfig.Global)
 
-	*koinosContract = koinosUtil.GetStringOption(koinosContractOption, emptyDefault, *koinosContract, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*koinosBlockStart = koinosUtil.GetStringOption(koinosBlockStartOption, emptyDefault, *koinosBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, emptyDefault, *koinosPK, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*koinosMaxBlocksToStream = koinosUtil.GetStringOption(koinosMaxBlocksToStreamOption, koinosMaxBlocksToStreamDefault, *koinosMaxBlocksToStream, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*koinosContract = koinosUtil.GetStringOption(koinosContractOption, emptyDefault, *koinosContract, yamlConfig.Bridge, yamlConfig.Global)
+	*koinosBlockStart = koinosUtil.GetStringOption(koinosBlockStartOption, emptyDefault, *koinosBlockStart, yamlConfig.Bridge, yamlConfig.Global)
+	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, emptyDefault, *koinosPK, yamlConfig.Bridge, yamlConfig.Global)
+	*koinosMaxBlocksToStream = koinosUtil.GetStringOption(koinosMaxBlocksToStreamOption, koinosMaxBlocksToStreamDefault, *koinosMaxBlocksToStream, yamlConfig.Bridge, yamlConfig.Global)
 
-	*validators = koinosUtil.GetStringSliceOption(validatorsOption, *validators, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.KoinosBridge, yamlConfig.Global)
+	*validators = koinosUtil.GetStringSliceOption(validatorsOption, *validators, yamlConfig.Bridge, yamlConfig.Global)
+	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.Bridge, yamlConfig.Global)
 
 	tokenAddresses := make(map[string]string)
 

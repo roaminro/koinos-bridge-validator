@@ -16,7 +16,7 @@ type YamlConfig struct {
 	JSONRPC           map[string]interface{} `yaml:"jsonrpc,omitempty"`
 	TransactionStore  map[string]interface{} `yaml:"transaction_store,omitempty"`
 	ContractMetaStore map[string]interface{} `yaml:"contract_meta_store,omitempty"`
-	KoinosBridge      map[string]interface{} `yaml:"koinos_bridge,omitempty"`
+	Bridge            map[string]interface{} `yaml:"bridge,omitempty"`
 }
 
 // InitYamlConfig initializes a yaml config
