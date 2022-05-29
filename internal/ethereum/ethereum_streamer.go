@@ -35,7 +35,6 @@ func StreamEthereumBlocks(
 	savedLastEthereumBlockParsed string,
 	ethRPC string,
 	ethContract string,
-	ethLogsTopic string,
 	ethMaxBlocksToStreamStr string,
 	noP2P bool,
 	koinosPKStr string,
@@ -49,6 +48,7 @@ func StreamEthereumBlocks(
 		panic(err)
 	}
 
+	topic := common.HexToHash("0x4c21824fb18b7a1c065b8a879a8952f7513e394fdc44b597dd51ea954cf37bf9")
 	eventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
@@ -110,7 +110,6 @@ func StreamEthereumBlocks(
 	startBlock++
 
 	contractAddress := common.HexToAddress(ethContract)
-	topic := common.HexToHash(ethLogsTopic)
 
 	var lastEthereumBlockParsed uint64
 	fromBlock := startBlock

@@ -35,7 +35,6 @@ const (
 
 	ethRPCOption               = "eth-rpc"
 	ethContractOption          = "eth-contract"
-	ethLogsTopicOption         = "eth-logs-topic"
 	ethBlockStartOption        = "eth-block-start"
 	ethPKOption                = "eth-pk"
 	ethMaxBlocksToStreamOption = "eth-max-blocks-stream"
@@ -83,7 +82,6 @@ func main() {
 
 	ethRPC := flag.StringP(ethRPCOption, "e", ethRPCDefault, "The url of the Ethereum RPC")
 	ethContract := flag.StringP(ethContractOption, "c", emptyDefault, "The address of the Ethereum bridge contract")
-	ethLogsTopic := flag.StringP(ethLogsTopicOption, "n", emptyDefault, "The topic to use when strea;ing the Ethereum contract logs")
 	ethBlockStart := flag.StringP(ethBlockStartOption, "t", ethBlockStartDefault, "The block from where to start the Ethereum blockchain streaming")
 	ethPK := flag.StringP(ethPKOption, "p", emptyDefault, "The private key to use to sign Ethereum related transfers")
 	ethMaxBlocksToStream := flag.StringP(ethMaxBlocksToStreamOption, "f", ethMaxBlocksToStreamDefault, "The maximum number of blocks to retrieve during Ethereum blockchain streaming")
@@ -114,7 +112,6 @@ func main() {
 
 	*ethRPC = koinosUtil.GetStringOption(ethRPCOption, ethRPCDefault, *ethRPC, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*ethContract = koinosUtil.GetStringOption(ethContractOption, emptyDefault, *ethContract, yamlConfig.KoinosBridge, yamlConfig.Global)
-	*ethLogsTopic = koinosUtil.GetStringOption(*ethLogsTopic, emptyDefault, *ethLogsTopic, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, ethBlockStartDefault, *ethBlockStart, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*ethPK = koinosUtil.GetStringOption(ethPKOption, emptyDefault, *ethPK, yamlConfig.KoinosBridge, yamlConfig.Global)
 	*ethMaxBlocksToStream = koinosUtil.GetStringOption(ethMaxBlocksToStreamOption, ethMaxBlocksToStreamDefault, *ethMaxBlocksToStream, yamlConfig.KoinosBridge, yamlConfig.Global)
@@ -257,7 +254,6 @@ func main() {
 			metadata.LastEthereumBlockParsed,
 			*ethRPC,
 			*ethContract,
-			*ethLogsTopic,
 			*ethMaxBlocksToStream,
 			*noP2P,
 			*koinosPK,
