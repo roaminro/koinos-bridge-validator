@@ -7,16 +7,23 @@ message metadata {
     string last_ethereum_block_parsed = 1;
 }
 
+enum transaction_type {
+    koinos = 0;
+    ethereum = 1;
+}
+
 message transaction {
-    string id = 1;
-    string op_id = 2;
-    string from = 3;
-    string eth_token = 4;
-    string koinos_token = 5;
-    string amount = 6;
-    string recipient = 7;
-    string hash = 8;
-    repeated string signatures = 9;
+    transaction_type type = 1;
+    string id = 2;
+    string op_id = 3;
+    string from = 4;
+    string eth_token = 5;
+    string koinos_token = 6;
+    string amount = 7;
+    string recipient = 8;
+    string hash = 9;
+    repeated string validators = 10;
+    repeated string signatures = 11;
 }
 
 enum action_id {

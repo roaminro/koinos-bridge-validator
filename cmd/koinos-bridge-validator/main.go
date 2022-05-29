@@ -91,7 +91,7 @@ func main() {
 	koinosPK := flag.StringP(koinosPKOption, "w", emptyDefault, "The private key to use to sign Koinos related transfers")
 	koinosMaxBlocksToStream := flag.StringP(koinosMaxBlocksToStreamOption, "g", emptyDefault, "The maximum number of blocks to retrieve during Koinos blockchain streaming")
 
-	validators := flag.StringSliceP(validatorsOption, "v", []string{}, "Koinos Addresses of the validators")
+	validatorsArr := flag.StringSliceP(validatorsOption, "v", []string{}, "Koinos Addresses of the validators")
 	tokenAddressesArr := flag.StringSliceP(tokensAddressesOption, "s", []string{}, "Addresses of the tokens supported by the bridge in the foram KOIN_TOKEN_ADDRRESS1:ETH_TOKEN_ADDRRESS1")
 
 	flag.Parse()
@@ -121,10 +121,20 @@ func main() {
 	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, emptyDefault, *koinosPK, yamlConfig.Bridge, yamlConfig.Global)
 	*koinosMaxBlocksToStream = koinosUtil.GetStringOption(koinosMaxBlocksToStreamOption, koinosMaxBlocksToStreamDefault, *koinosMaxBlocksToStream, yamlConfig.Bridge, yamlConfig.Global)
 
-	*validators = koinosUtil.GetStringSliceOption(validatorsOption, *validators, yamlConfig.Bridge, yamlConfig.Global)
+	*validatorsArr = koinosUtil.GetStringSliceOption(validatorsOption, *validatorsArr, yamlConfig.Bridge, yamlConfig.Global)
 	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.Bridge, yamlConfig.Global)
 
+	validators := make(map[string]string)
 	tokenAddresses := make(map[string]string)
+
+	for _, addressesStr := range *validatorsArr {
+		// first element is Koin validator address
+		// second element is Ethereum validator address
+		addresses := strings.Split(addressesStr, ":")
+
+		validators[addresses[0]] = addresses[1]
+		validators[addresses[1]] = addresses[0]
+	}
 
 	for _, tokensStr := range *tokenAddressesArr {
 		// first element is Koin token address
@@ -223,7 +233,16 @@ func main() {
 
 	log.Infof("starting listening amqp server %s\n", *amqp)
 
-	requestHandler.SetRPCHandler(pluginName, rpc.P2PHandleRPC)
+	requestHandler.SetRPCHandler(pluginName, func(rpcType string, data []byte) ([]byte, error) {
+		return rpc.P2PHandleRPC(
+			rpcType,
+			data,
+			*ethContract,
+			*koinosContract,
+			ethTxStore,
+			validators,
+		)
+	})
 	requestHandler.SetRPCHandler(appName, func(rpcType string, data []byte) ([]byte, error) {
 		return rpc.HandleRPC(rpcType, data, ethTxStore)
 	})

@@ -34,7 +34,7 @@ func StreamEthereumBlocks(
 	metadataStore *store.MetadataStore,
 	savedLastEthereumBlockParsed string,
 	ethRPC string,
-	ethContract string,
+	ethContractStr string,
 	ethMaxBlocksToStreamStr string,
 	noP2P bool,
 	koinosPKStr string,
@@ -43,6 +43,11 @@ func StreamEthereumBlocks(
 	ethTxStore *store.TransactionsStore,
 ) {
 	koinosPK, err := koinosUtil.DecodeWIF(koinosPKStr)
+	if err != nil {
+		panic(err)
+	}
+
+	koinosKey, err := koinosUtil.NewKoinosKeysFromBytes(koinosPK)
 
 	if err != nil {
 		panic(err)
@@ -109,7 +114,11 @@ func StreamEthereumBlocks(
 
 	startBlock++
 
-	contractAddress := common.HexToAddress(ethContract)
+	ethContractAddr := common.HexToAddress(ethContractStr)
+	koinosContractAddr, err := base58.Decode(koinosContractStr)
+	if err != nil {
+		panic(err)
+	}
 
 	var lastEthereumBlockParsed uint64
 	fromBlock := startBlock
@@ -154,7 +163,7 @@ func StreamEthereumBlocks(
 					FromBlock: big.NewInt(int64(fromBlock)),
 					ToBlock:   big.NewInt(int64(toBlock)),
 					Addresses: []common.Address{
-						contractAddress,
+						ethContractAddr,
 					},
 					Topics: [][]common.Hash{
 						{topic},
@@ -198,21 +207,16 @@ func StreamEthereumBlocks(
 						panic(err)
 					}
 
-					koinosContract, err := base58.Decode(koinosContractStr)
-					if err != nil {
-						panic(err)
-					}
-
 					log.Infof("new Eth event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
 
-					// sign the event
+					// sign the transaction
 					completeTransferHash := &bridge_pb.CompleteTransferHash{
 						Action:        bridge_pb.ActionId_complete_transfer,
 						TransactionId: txId,
 						Token:         koinosToken,
 						Recipient:     recipient,
 						Amount:        amount,
-						ContractId:    koinosContract,
+						ContractId:    koinosContractAddr,
 					}
 
 					completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
@@ -226,7 +230,7 @@ func StreamEthereumBlocks(
 					sigBytes := util.SignKoinosHash(koinosPK, hash[:])
 					sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
 
-					// store the event
+					// store the transaction
 					ethTx, err := ethTxStore.Get(txIdHex)
 					if err != nil {
 						panic(err)
@@ -234,15 +238,21 @@ func StreamEthereumBlocks(
 
 					if ethTx == nil {
 						ethTx = &bridge_pb.Transaction{}
+						ethTx.Validators = []string{koinosKey.Public()}
 						ethTx.Signatures = []string{sigB64}
 					} else {
 						if ethTx.Hash != hashB64 {
-							log.Warnf("the calulated hash for tx %s is different than the one already received received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
+							errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one already received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
+							log.Errorf(errMsg)
+							panic(fmt.Errorf(errMsg))
 						}
+						ethTx.Validators = append(ethTx.Validators, koinosKey.Public())
 						ethTx.Signatures = append(ethTx.Signatures, sigB64)
 					}
 
+					ethTx.Type = bridge_pb.TransactionType_ethereum
 					ethTx.Id = txIdHex
+					ethTx.OpId = ""
 					ethTx.From = ethFrom
 					ethTx.EthToken = ethToken
 					ethTx.KoinosToken = tokenAddresses[ethToken]
@@ -250,7 +260,11 @@ func StreamEthereumBlocks(
 					ethTx.Recipient = event.Recipient
 					ethTx.Hash = hashB64
 
-					ethTxStore.Put(txIdHex, ethTx)
+					err = ethTxStore.Put(txIdHex, ethTx)
+
+					if err != nil {
+						panic(err)
+					}
 
 					if !noP2P {
 						ethTxBytes, err := proto.Marshal(ethTx)

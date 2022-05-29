@@ -1,11 +1,16 @@
 package util
 
 import (
+	"encoding/base64"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
 	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcutil"
+	log "github.com/koinos/koinos-log-golang"
+	"github.com/mr-tron/base58"
 	"gopkg.in/yaml.v2"
 )
 
@@ -56,4 +61,30 @@ func SignKoinosHash(key []byte, hash []byte) []byte {
 	}
 
 	return signatureBytes
+}
+
+func PublicKeyToAddress(pubkey *btcec.PublicKey) ([]byte, error) {
+	mainNetAddr, _ := btcutil.NewAddressPubKey(pubkey.SerializeCompressed(), &chaincfg.MainNetParams)
+	return base58.Decode(mainNetAddr.EncodeAddress())
+}
+
+func RecoverAddressFromSignature(signature string, hash []byte) (string, error) {
+	signatureBytes, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		log.Error(err.Error())
+		return "", err
+	}
+
+	validatorPubKey, _, err := btcec.RecoverCompact(btcec.S256(), signatureBytes, hash[:])
+	if err != nil {
+		log.Error(err.Error())
+		return "", err
+	}
+	validatorAddressBytes, err := PublicKeyToAddress(validatorPubKey)
+	if err != nil {
+		log.Error(err.Error())
+		return "", err
+	}
+
+	return base58.Encode(validatorAddressBytes), nil
 }
