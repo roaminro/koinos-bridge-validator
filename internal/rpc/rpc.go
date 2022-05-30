@@ -197,6 +197,7 @@ func P2PHandleRPC(
 									ethTx.Signatures = append(ethTx.Signatures, sig)
 								}
 							} else {
+								// TODO: check if other values in transaction are legit before saving it
 								ethTx = transaction
 							}
 
