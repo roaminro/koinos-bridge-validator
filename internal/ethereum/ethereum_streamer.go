@@ -48,6 +48,7 @@ func StreamEthereumBlocks(
 	}
 
 	koinosKey, err := koinosUtil.NewKoinosKeysFromBytes(koinosPK)
+	koinosKeyB58 := base58.Encode(koinosKey.AddressBytes())
 
 	if err != nil {
 		panic(err)
@@ -238,7 +239,7 @@ func StreamEthereumBlocks(
 
 					if ethTx == nil {
 						ethTx = &bridge_pb.Transaction{}
-						ethTx.Validators = []string{koinosKey.Public()}
+						ethTx.Validators = []string{koinosKeyB58}
 						ethTx.Signatures = []string{sigB64}
 					} else {
 						if ethTx.Hash != hashB64 {
@@ -246,13 +247,12 @@ func StreamEthereumBlocks(
 							log.Errorf(errMsg)
 							panic(fmt.Errorf(errMsg))
 						}
-						ethTx.Validators = append(ethTx.Validators, koinosKey.Public())
+						ethTx.Validators = append(ethTx.Validators, koinosKeyB58)
 						ethTx.Signatures = append(ethTx.Signatures, sigB64)
 					}
 
 					ethTx.Type = bridge_pb.TransactionType_ethereum
 					ethTx.Id = txIdHex
-					ethTx.OpId = ""
 					ethTx.From = ethFrom
 					ethTx.EthToken = ethToken
 					ethTx.KoinosToken = tokenAddresses[ethToken]

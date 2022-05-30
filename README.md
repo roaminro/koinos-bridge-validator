@@ -8,6 +8,8 @@ command example:
 
 ```bash
 go run cmd/koinos-bridge-validator/main.go \
+    --amqp amqp://guest:guest@localhost:5672/ \
+    --validators 1Dd9qtqWTPGvhKRLhyDvPkNsGPK1qNz6Hk:abcd,1GWSnBFJB1fx2Qotb3nx9b2JL9TFB14e2P:efgh
     --reset \
     --no-p2p \
     --eth-rpc http://127.0.0.1:8545/ \
@@ -19,6 +21,8 @@ go run cmd/koinos-bridge-validator/main.go \
 
 ```bash
 go run cmd/koinos-bridge-validator/main.go \
+    --amqp amqp://guest:guest@localhost:5672/ \
+    --validators 1Dd9qtqWTPGvhKRLhyDvPkNsGPK1qNz6Hk:abcd,1GWSnBFJB1fx2Qotb3nx9b2JL9TFB14e2P:efgh \
     --reset \
     --eth-rpc http://127.0.0.1:8545/ \
     --eth-contract 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
@@ -28,5 +32,5 @@ go run cmd/koinos-bridge-validator/main.go \
 ```
 
 ```bash
-curl --location --request POST 'http://127.0.0.1:8080/' --data-raw '{"id": 2,"jsonrpc": "2.0","method": "bridge.get_ethereum_transaction","params": {"trnsaction_id": "0x7cba357d8570ae424d2ca2be2df14cdfb55cd9dc557c6171ba1e43a15101f045"}}'
+curl --location --request POST 'http://127.0.0.1:8080/' --data-raw '{"id": 2,"jsonrpc": "2.0","method": "bridge.get_ethereum_transaction","params": {"transaction_id": "0x7cba357d8570ae424d2ca2be2df14cdfb55cd9dc557c6171ba1e43a15101f045"}}'
 ```

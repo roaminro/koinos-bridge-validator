@@ -81,126 +81,131 @@ func P2PHandleRPC(
 		log.Error(err.Error())
 		return nil, err
 	} else {
-		log.Debugf("Received RPC request: 0x%v", hex.EncodeToString(req.GetSubmitData().Data))
-		transaction := &bridge_pb.Transaction{}
+		if req.Request != nil {
+			switch v := req.Request.(type) {
+			case *rpcplugin.PluginRequest_SubmitData:
+				transaction := &bridge_pb.Transaction{}
 
-		err := proto.Unmarshal(req.GetSubmitData().Data, transaction)
-
-		if err != nil {
-			log.Warnf("Received malformed request: 0x%v", hex.EncodeToString(req.GetSubmitData().Data))
-			eResp := prpc.ErrorResponse{Message: err.Error()}
-			rErr := rpcplugin.PluginResponse_Error{Error: &eResp}
-			resp.Response = &rErr
-		} else {
-			if transaction.Type == bridge_pb.TransactionType_ethereum {
-				// check transaction hash
-				txIdBytes := common.FromHex(transaction.Id)
-
-				amount, err := strconv.ParseUint(transaction.Amount, 0, 64)
+				err := proto.Unmarshal(v.SubmitData.Data, transaction)
+				log.Debugf("Received RPC request: 0x%v", hex.EncodeToString(data))
 				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
+					log.Warnf("Received malformed request: 0x%v", hex.EncodeToString(req.GetSubmitData().Data))
+					eResp := prpc.ErrorResponse{Message: err.Error()}
+					rErr := rpcplugin.PluginResponse_Error{Error: &eResp}
+					resp.Response = &rErr
+				} else {
+					if transaction.Type == bridge_pb.TransactionType_ethereum {
+						log.Infof("received Ethereum tx %s / validators: %+q / signatures: %+q", transaction.Id, transaction.Validators, transaction.Signatures)
+						// check transaction hash
+						txIdBytes := common.FromHex(transaction.Id)
 
-				koinosToken, err := base58.Decode(transaction.KoinosToken)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-				recipient, err := base58.Decode(transaction.Recipient)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-
-				completeTransferHash := &bridge_pb.CompleteTransferHash{
-					Action:        bridge_pb.ActionId_complete_transfer,
-					TransactionId: txIdBytes,
-					Token:         koinosToken,
-					Recipient:     recipient,
-					Amount:        amount,
-					ContractId:    koinosContractAddr,
-				}
-
-				completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
-				if err != nil {
-					log.Error(err.Error())
-					return nil, err
-				}
-
-				hash := sha256.Sum256(completeTransferHashBytes)
-				hashB64 := base64.StdEncoding.EncodeToString(hash[:])
-
-				if hashB64 != transaction.Hash {
-					errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", transaction.Id, transaction.Hash, hashB64)
-					log.Errorf(errMsg)
-					return nil, fmt.Errorf(errMsg)
-				} else if len(transaction.Validators) == len(transaction.Signatures) {
-					// check signatures
-					for index, signature := range transaction.Signatures {
-						validatorReceived := transaction.Validators[index]
-
-						_, found := validators[validatorReceived]
-						if !found {
-							errMsg := fmt.Sprintf("validator %s is not allowed", validatorReceived)
-							log.Errorf(errMsg)
-							return nil, fmt.Errorf(errMsg)
-						}
-
-						validatorCalculated, err := util.RecoverAddressFromSignature(signature, hash[:])
+						amount, err := strconv.ParseUint(transaction.Amount, 0, 64)
 						if err != nil {
 							log.Error(err.Error())
 							return nil, err
 						}
 
-						if validatorReceived != validatorCalculated {
-							errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
+						koinosToken, err := base58.Decode(transaction.KoinosToken)
+						if err != nil {
+							log.Error(err.Error())
+							return nil, err
+						}
+						recipient, err := base58.Decode(transaction.Recipient)
+						if err != nil {
+							log.Error(err.Error())
+							return nil, err
+						}
+
+						completeTransferHash := &bridge_pb.CompleteTransferHash{
+							Action:        bridge_pb.ActionId_complete_transfer,
+							TransactionId: txIdBytes,
+							Token:         koinosToken,
+							Recipient:     recipient,
+							Amount:        amount,
+							ContractId:    koinosContractAddr,
+						}
+
+						completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
+						if err != nil {
+							log.Error(err.Error())
+							return nil, err
+						}
+
+						hash := sha256.Sum256(completeTransferHashBytes)
+						hashB64 := base64.StdEncoding.EncodeToString(hash[:])
+
+						if hashB64 != transaction.Hash {
+							errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", transaction.Id, transaction.Hash, hashB64)
 							log.Errorf(errMsg)
 							return nil, fmt.Errorf(errMsg)
-						}
-					}
+						} else if len(transaction.Validators) == len(transaction.Signatures) {
+							// check signatures
+							for index, signature := range transaction.Signatures {
+								validatorReceived := transaction.Validators[index]
 
-					// check if we already have this transaction in our store
-					ethTx, err := ethTxStore.Get(transaction.Id)
-					if err != nil {
-						panic(err)
-					}
+								_, found := validators[validatorReceived]
+								if !found {
+									errMsg := fmt.Sprintf("validator %s is not allowed", validatorReceived)
+									log.Errorf(errMsg)
+									return nil, fmt.Errorf(errMsg)
+								}
 
-					if ethTx != nil {
-						if ethTx.Hash != hashB64 {
-							errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one received %s != calculated %s", transaction.Hash, ethTx.Hash, hashB64)
+								validatorCalculated, err := util.RecoverAddressFromSignature(signature, hash[:])
+								if err != nil {
+									log.Error(err.Error())
+									return nil, err
+								}
 
-							log.Errorf(errMsg)
-							return nil, fmt.Errorf(errMsg)
-						}
+								if validatorReceived != validatorCalculated {
+									errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
+									log.Errorf(errMsg)
+									return nil, fmt.Errorf(errMsg)
+								}
+							}
 
-						signatures := make(map[string]string)
+							// check if we already have this transaction in our store
+							ethTx, err := ethTxStore.Get(transaction.Id)
+							if err != nil {
+								panic(err)
+							}
 
-						for index, validatr := range ethTx.Validators {
-							signatures[validatr] = ethTx.Signatures[index]
-						}
+							if ethTx != nil {
+								if ethTx.Hash != hashB64 {
+									errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one received %s != calculated %s", transaction.Hash, ethTx.Hash, hashB64)
 
-						for index, validatr := range transaction.Validators {
-							_, found := signatures[validatr]
-							if !found {
-								signatures[validatr] = transaction.Signatures[index]
+									log.Errorf(errMsg)
+									return nil, fmt.Errorf(errMsg)
+								}
+
+								signatures := make(map[string]string)
+
+								for index, validatr := range ethTx.Validators {
+									signatures[validatr] = ethTx.Signatures[index]
+								}
+
+								for index, validatr := range transaction.Validators {
+									_, found := signatures[validatr]
+									if !found {
+										signatures[validatr] = transaction.Signatures[index]
+									}
+								}
+
+								ethTx.Validators = []string{}
+								ethTx.Signatures = []string{}
+								for val, sig := range signatures {
+									ethTx.Validators = append(ethTx.Validators, val)
+									ethTx.Signatures = append(ethTx.Signatures, sig)
+								}
+							} else {
+								ethTx = transaction
+							}
+
+							err = ethTxStore.Put(ethTx.Id, ethTx)
+
+							if err != nil {
+								panic(err)
 							}
 						}
-
-						ethTx.Validators = []string{}
-						ethTx.Signatures = []string{}
-						for val, sig := range signatures {
-							ethTx.Validators = append(ethTx.Validators, val)
-							ethTx.Signatures = append(ethTx.Signatures, sig)
-						}
-					} else {
-						ethTx = transaction
-					}
-
-					err = ethTxStore.Put(ethTx.Id, ethTx)
-
-					if err != nil {
-						panic(err)
 					}
 				}
 			}
