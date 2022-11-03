@@ -12,6 +12,7 @@ import (
 type TransactionsStore struct {
 	backend Backend
 	rwmutex sync.RWMutex
+	sync.Mutex
 }
 
 // NewTransactionsStore creates a new TransactionsStore wrapping the provided backend

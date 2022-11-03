@@ -15,10 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/koinos/koinos-log-golang"
-	koinosmq "github.com/koinos/koinos-mq-golang"
 	koinosUtil "github.com/koinos/koinos-util-golang"
 
-	"github.com/koinos/koinos-proto-golang/koinos/broadcast"
 	"github.com/mr-tron/base58"
 
 	"github.com/roaminroe/koinos-bridge-validator/internal/store"
@@ -30,17 +28,16 @@ import (
 
 func StreamEthereumBlocks(
 	ctx context.Context,
-	mqClient *koinosmq.Client,
 	metadataStore *store.MetadataStore,
 	savedLastEthereumBlockParsed string,
 	ethRPC string,
 	ethContractStr string,
 	ethMaxBlocksToStreamStr string,
-	noP2P bool,
 	koinosPKStr string,
 	koinosContractStr string,
 	tokenAddresses map[string]string,
 	ethTxStore *store.TransactionsStore,
+	signaturesExpiration uint,
 ) {
 	koinosPK, err := koinosUtil.DecodeWIF(koinosPKStr)
 	if err != nil {
@@ -54,7 +51,8 @@ func StreamEthereumBlocks(
 		panic(err)
 	}
 
-	topic := common.HexToHash("0x4c21824fb18b7a1c065b8a879a8952f7513e394fdc44b597dd51ea954cf37bf9")
+	// topic = keccak-256("LogTokensLocked(address,address,uint256,string,uint256)")
+	topic := common.HexToHash("0xdd58de01fef6397c5b9ce2dc1f605fa2dd517bf630021e009a6ecadbc0abe23f")
 	eventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
@@ -81,6 +79,12 @@ func StreamEthereumBlocks(
 			"internalType": "string",
 			"name": "recipient",
 			"type": "string"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "uint256",
+			"name": "blocktime",
+			"type": "uint256"
 		  }
 		],
 		"name": "LogTokensLocked",
@@ -128,10 +132,15 @@ func StreamEthereumBlocks(
 		select {
 		case <-ctx.Done():
 			log.Infof("stop streaming logs")
+			metadataStore.Lock()
+			defer metadataStore.Unlock()
+
 			metadata, err := metadataStore.Get()
 			if err != nil {
 				panic(err)
 			}
+
+			log.Infof("stop streaming logs %d", metadata.LastEthereumBlockParsed)
 
 			metadata.LastEthereumBlockParsed = strconv.FormatUint(lastEthereumBlockParsed, 10)
 
@@ -184,6 +193,7 @@ func StreamEthereumBlocks(
 						From      common.Address
 						Recipient string
 						Amount    *big.Int
+						Blocktime *big.Int
 					}{}
 
 					err := eventAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
@@ -197,6 +207,7 @@ func StreamEthereumBlocks(
 					ethFrom := event.From.Hex()
 					ethToken := event.Token.Hex()
 					amount := event.Amount.Uint64()
+					blocktime := event.Blocktime.Uint64()
 
 					koinosToken, err := base58.Decode(tokenAddresses[ethToken])
 					if err != nil {
@@ -210,6 +221,8 @@ func StreamEthereumBlocks(
 
 					log.Infof("new Eth event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
 
+					expiration := blocktime + uint64(signaturesExpiration)
+
 					// sign the transaction
 					completeTransferHash := &bridge_pb.CompleteTransferHash{
 						Action:        bridge_pb.ActionId_complete_transfer,
@@ -218,6 +231,7 @@ func StreamEthereumBlocks(
 						Recipient:     recipient,
 						Amount:        amount,
 						ContractId:    koinosContractAddr,
+						Expiration:    expiration,
 					}
 
 					completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
@@ -232,6 +246,8 @@ func StreamEthereumBlocks(
 					sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
 
 					// store the transaction
+					ethTxStore.Lock()
+
 					ethTx, err := ethTxStore.Get(txIdHex)
 					if err != nil {
 						panic(err)
@@ -259,6 +275,10 @@ func StreamEthereumBlocks(
 					ethTx.Amount = event.Amount.String()
 					ethTx.Recipient = event.Recipient
 					ethTx.Hash = hashB64
+					ethTx.BlockNumber = vLog.BlockNumber
+					ethTx.BlockTime = blocktime
+					ethTx.Expiration = expiration
+					ethTx.Status = bridge_pb.TransactionStatus_gathering_signature
 
 					err = ethTxStore.Put(txIdHex, ethTx)
 
@@ -266,24 +286,7 @@ func StreamEthereumBlocks(
 						panic(err)
 					}
 
-					if !noP2P {
-						ethTxBytes, err := proto.Marshal(ethTx)
-						if err != nil {
-							panic(err)
-						}
-
-						pluginBroadcast := &broadcast.PluginBroadcast{
-							Data: ethTxBytes,
-						}
-
-						bytes, err := proto.Marshal(pluginBroadcast)
-
-						if err != nil {
-							panic(err)
-						}
-
-						mqClient.Broadcast("application/octet-stream", "plugin.bridge", bytes)
-					}
+					ethTxStore.Unlock()
 
 					lastEthereumBlockParsed = vLog.BlockNumber
 				}

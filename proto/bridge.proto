@@ -12,18 +12,28 @@ enum transaction_type {
     ethereum = 1;
 }
 
+enum transaction_status{
+    gathering_signature = 0;
+    signed = 1;
+    completed = 2;
+}
+
 message transaction {
     transaction_type type = 1;
     string id = 2;
     string op_id = 3;
-    string from = 4;
-    string eth_token = 5;
-    string koinos_token = 6;
-    string amount = 7;
-    string recipient = 8;
-    string hash = 9;
-    repeated string validators = 10;
-    repeated string signatures = 11;
+    uint64 block_number = 4;
+    uint64 block_time = 5;
+    uint64 expiration = 6;
+    string from = 7;
+    string eth_token = 8;
+    string koinos_token = 9;
+    string amount = 10;
+    string recipient = 11;
+    string hash = 12;
+    repeated string validators = 13;
+    repeated string signatures = 14;
+    transaction_status status = 15;
 }
 
 enum action_id {
@@ -45,4 +55,5 @@ message complete_transfer_hash {
     bytes recipient = 4;
     uint64 amount = 5;
     bytes contract_id = 6;
-}
+    uint64 expiration = 7;
+  }

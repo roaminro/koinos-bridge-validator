@@ -14,14 +14,43 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type ValidatorConfig struct {
+	EthereumAddress string `yaml:"ethereum-address"`
+	KoinosAddress   string `yaml:"koinos-address"`
+	ApiUrl          string `yaml:"api-url"`
+}
+
+type TokenConfig struct {
+	EthereumAddress string `yaml:"ethereum-address"`
+	KoinosAddress   string `yaml:"koinos-address"`
+}
+
+type BridgeConfig struct {
+	Reset                bool   `yaml:"reset"`
+	InstanceID           string `yaml:"instance-id"`
+	LogLevel             string `yaml:"log-level"`
+	SignaturesExpiration uint   `yaml:"signatures-expiration"`
+	ApiUrl               string `yaml:"api-url"`
+
+	EthereumRpc             string `yaml:"ethereum-rpc"`
+	EthereumContract        string `yaml:"ethereum-contract"`
+	EthereumBlockStart      string `yaml:"ethereum-block-start"`
+	EthereumPK              string `yaml:"ethereum-pk"`
+	EthereumMaxBlocksStream string `yaml:"ethereum-max-blocks-stream"`
+
+	KoinosRpc             string `yaml:"koinos-rpc"`
+	KoinosContract        string `yaml:"koinos-contract"`
+	KoinosBlockStart      string `yaml:"koinos-block-start"`
+	KoinosPK              string `yaml:"koinos-pk"`
+	KoinosMaxBlocksStream string `yaml:"koinos-max-blocks-stream"`
+
+	Validators map[string]ValidatorConfig `yaml:"validators"`
+	Tokens     map[string]TokenConfig     `yaml:"tokens"`
+}
+
 type YamlConfig struct {
-	Global            map[string]interface{} `yaml:"global,omitempty"`
-	P2P               map[string]interface{} `yaml:"p2p,omitempty"`
-	BlockStore        map[string]interface{} `yaml:"block_store,omitempty"`
-	JSONRPC           map[string]interface{} `yaml:"jsonrpc,omitempty"`
-	TransactionStore  map[string]interface{} `yaml:"transaction_store,omitempty"`
-	ContractMetaStore map[string]interface{} `yaml:"contract_meta_store,omitempty"`
-	Bridge            map[string]interface{} `yaml:"bridge,omitempty"`
+	Global map[string]interface{} `yaml:"global,omitempty"`
+	Bridge BridgeConfig           `yaml:"bridge"`
 }
 
 // InitYamlConfig initializes a yaml config
@@ -32,6 +61,7 @@ func InitYamlConfig(baseDir string) *YamlConfig {
 	}
 
 	yamlConfig := YamlConfig{}
+
 	if _, err := os.Stat(yamlConfigPath); err == nil {
 		data, err := ioutil.ReadFile(yamlConfigPath)
 		if err != nil {
@@ -42,10 +72,6 @@ func InitYamlConfig(baseDir string) *YamlConfig {
 		if err != nil {
 			panic(err)
 		}
-	} else {
-		yamlConfig.Global = make(map[string]interface{})
-		yamlConfig.P2P = make(map[string]interface{})
-		yamlConfig.BlockStore = make(map[string]interface{})
 	}
 
 	return &yamlConfig
@@ -61,6 +87,30 @@ func SignKoinosHash(key []byte, hash []byte) []byte {
 	}
 
 	return signatureBytes
+}
+
+func GetStringOption(a string, b string) string {
+	if a != "" {
+		return a
+	} else {
+		return b
+	}
+}
+
+func GetUIntOption(a uint, b uint) uint {
+	if a != 0 {
+		return a
+	} else {
+		return b
+	}
+}
+
+func GetBoolOption(a bool, b bool) bool {
+	if a {
+		return a
+	} else {
+		return b
+	}
 }
 
 func PublicKeyToAddress(pubkey *btcec.PublicKey) ([]byte, error) {

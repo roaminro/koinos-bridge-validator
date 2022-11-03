@@ -3,18 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path"
-	"strings"
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
-
-	koinosmq "github.com/koinos/koinos-mq-golang"
-
+	"github.com/roaminroe/koinos-bridge-validator/internal/api"
 	"github.com/roaminroe/koinos-bridge-validator/internal/ethereum"
-	"github.com/roaminroe/koinos-bridge-validator/internal/rpc"
 	"github.com/roaminroe/koinos-bridge-validator/internal/store"
 	"github.com/roaminroe/koinos-bridge-validator/internal/util"
 	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
@@ -26,73 +24,36 @@ import (
 )
 
 const (
-	basedirOption    = "basedir"
-	amqpOption       = "amqp"
-	instanceIDOption = "instance-id"
-	logLevelOption   = "log-level"
-	resetOption      = "reset"
-	noP2POption      = "no-p2p"
-
-	ethRPCOption               = "eth-rpc"
-	ethContractOption          = "eth-contract"
-	ethBlockStartOption        = "eth-block-start"
-	ethPKOption                = "eth-pk"
-	ethMaxBlocksToStreamOption = "eth-max-blocks-stream"
-
-	koinosContractOption          = "koinos-contract"
-	koinosBlockStartOption        = "koinos-block-start"
-	koinosPKOption                = "koinos-pk"
-	koinosMaxBlocksToStreamOption = "koinos-max-blocks-stream"
-
-	validatorsOption      = "validators"
-	tokensAddressesOption = "token-addresses"
+	basedirOption = "basedir"
 )
 
 const (
-	basedirDefault    = ".koinos"
-	amqpDefault       = "amqp://guest:guest@localhost:5672/"
+	basedirDefault    = "~/.koinos"
 	instanceIDDefault = ""
 	logLevelDefault   = "info"
 	resetDefault      = false
-	noP2PDefault      = false
 
 	ethRPCDefault               = "http://127.0.0.1:8545/"
 	ethBlockStartDefault        = "0"
-	ethMaxBlocksToStreamDefault = "1000"
+	ethMaxBlocksToStreamDefault = "500"
 
+	koinosRPCDefault               = "http://127.0.0.1:8080/"
 	koinosBlockStartDefault        = "0"
-	koinosMaxBlocksToStreamDefault = "1000"
+	koinosMaxBlocksToStreamDefault = "500"
 
 	emptyDefault = ""
+
+	signaturesExpirationDefault uint = 60 * 30 // 30mins
+	apiUrlDefault                    = ":3000"
 )
 
 const (
-	pluginName = "plugin.bridge"
-	appName    = "bridge"
-	logDir     = "logs"
+	appName = "bridge"
+	logDir  = "logs"
 )
 
 func main() {
-	var baseDir = flag.StringP(basedirOption, "d", basedirDefault, "the base directory")
-	var amqp = flag.StringP(amqpOption, "a", emptyDefault, "AMQP server URL")
-	var reset = flag.BoolP(resetOption, "r", resetDefault, "reset the database")
-	var noP2P = flag.BoolP(noP2POption, "b", noP2PDefault, "disable P2P")
-	instanceID := flag.StringP(instanceIDOption, "i", instanceIDDefault, "The instance ID to identify this service")
-	logLevel := flag.StringP(logLevelOption, "l", logLevelDefault, "The log filtering level (debug, info, warn, error)")
-
-	ethRPC := flag.StringP(ethRPCOption, "e", emptyDefault, "The url of the Ethereum RPC")
-	ethContract := flag.StringP(ethContractOption, "c", emptyDefault, "The address of the Ethereum bridge contract")
-	ethBlockStart := flag.StringP(ethBlockStartOption, "t", emptyDefault, "The block from where to start the Ethereum blockchain streaming")
-	ethPK := flag.StringP(ethPKOption, "p", emptyDefault, "The private key to use to sign Ethereum related transfers")
-	ethMaxBlocksToStream := flag.StringP(ethMaxBlocksToStreamOption, "f", emptyDefault, "The maximum number of blocks to retrieve during Ethereum blockchain streaming")
-
-	koinosContract := flag.StringP(koinosContractOption, "k", emptyDefault, "The address of the Koinos bridge contract")
-	koinosBlockStart := flag.StringP(koinosBlockStartOption, "o", emptyDefault, "The block from where to start the Koinos blockchain streaming")
-	koinosPK := flag.StringP(koinosPKOption, "w", emptyDefault, "The private key to use to sign Koinos related transfers")
-	koinosMaxBlocksToStream := flag.StringP(koinosMaxBlocksToStreamOption, "g", emptyDefault, "The maximum number of blocks to retrieve during Koinos blockchain streaming")
-
-	validatorsArr := flag.StringSliceP(validatorsOption, "v", []string{}, "Koinos Addresses of the validators")
-	tokenAddressesArr := flag.StringSliceP(tokensAddressesOption, "s", []string{}, "Addresses of the tokens supported by the bridge in the foram KOIN_TOKEN_ADDRRESS1:ETH_TOKEN_ADDRRESS1")
+	baseDir := flag.StringP(basedirOption, "d", basedirDefault, "the base directory")
 
 	flag.Parse()
 
@@ -104,54 +65,46 @@ func main() {
 
 	yamlConfig := util.InitYamlConfig(*baseDir)
 
-	*amqp = koinosUtil.GetStringOption(amqpOption, amqpDefault, *amqp, yamlConfig.Bridge, yamlConfig.Global)
-	*logLevel = koinosUtil.GetStringOption(logLevelOption, logLevelDefault, *logLevel, yamlConfig.Bridge, yamlConfig.Global)
-	*instanceID = koinosUtil.GetStringOption(instanceIDOption, koinosUtil.GenerateBase58ID(5), *instanceID, yamlConfig.Bridge, yamlConfig.Global)
-	*reset = koinosUtil.GetBoolOption(resetOption, resetDefault, *reset, yamlConfig.Bridge, yamlConfig.Global)
-	*noP2P = koinosUtil.GetBoolOption(noP2POption, noP2PDefault, *noP2P, yamlConfig.Bridge, yamlConfig.Global)
+	fmt.Println(yamlConfig.Bridge.Reset)
 
-	*ethRPC = koinosUtil.GetStringOption(ethRPCOption, ethRPCDefault, *ethRPC, yamlConfig.Bridge, yamlConfig.Global)
-	*ethContract = koinosUtil.GetStringOption(ethContractOption, emptyDefault, *ethContract, yamlConfig.Bridge, yamlConfig.Global)
-	*ethBlockStart = koinosUtil.GetStringOption(ethBlockStartOption, ethBlockStartDefault, *ethBlockStart, yamlConfig.Bridge, yamlConfig.Global)
-	*ethPK = koinosUtil.GetStringOption(ethPKOption, emptyDefault, *ethPK, yamlConfig.Bridge, yamlConfig.Global)
-	*ethMaxBlocksToStream = koinosUtil.GetStringOption(ethMaxBlocksToStreamOption, ethMaxBlocksToStreamDefault, *ethMaxBlocksToStream, yamlConfig.Bridge, yamlConfig.Global)
+	logLevel := util.GetStringOption(yamlConfig.Bridge.LogLevel, logLevelDefault)
+	instanceID := util.GetStringOption(yamlConfig.Bridge.InstanceID, koinosUtil.GenerateBase58ID(5))
+	reset := util.GetBoolOption(yamlConfig.Bridge.Reset, resetDefault)
+	signaturesExpiration := util.GetUIntOption(yamlConfig.Bridge.SignaturesExpiration, signaturesExpirationDefault)
+	apiUrl := util.GetStringOption(yamlConfig.Bridge.ApiUrl, apiUrlDefault)
 
-	*koinosContract = koinosUtil.GetStringOption(koinosContractOption, emptyDefault, *koinosContract, yamlConfig.Bridge, yamlConfig.Global)
-	*koinosBlockStart = koinosUtil.GetStringOption(koinosBlockStartOption, emptyDefault, *koinosBlockStart, yamlConfig.Bridge, yamlConfig.Global)
-	*koinosPK = koinosUtil.GetStringOption(koinosPKOption, emptyDefault, *koinosPK, yamlConfig.Bridge, yamlConfig.Global)
-	*koinosMaxBlocksToStream = koinosUtil.GetStringOption(koinosMaxBlocksToStreamOption, koinosMaxBlocksToStreamDefault, *koinosMaxBlocksToStream, yamlConfig.Bridge, yamlConfig.Global)
+	ethRPC := util.GetStringOption(yamlConfig.Bridge.EthereumRpc, ethRPCDefault)
+	ethContract := util.GetStringOption(yamlConfig.Bridge.EthereumContract, emptyDefault)
+	ethBlockStart := util.GetStringOption(yamlConfig.Bridge.EthereumBlockStart, ethBlockStartDefault)
+	ethMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.EthereumMaxBlocksStream, ethMaxBlocksToStreamDefault)
+	// ethPK := util.GetStringOption(yamlConfig.Bridge.EthereumPK, emptyDefault)
 
-	*validatorsArr = koinosUtil.GetStringSliceOption(validatorsOption, *validatorsArr, yamlConfig.Bridge, yamlConfig.Global)
-	*tokenAddressesArr = koinosUtil.GetStringSliceOption(tokensAddressesOption, *tokenAddressesArr, yamlConfig.Bridge, yamlConfig.Global)
+	// koinosRPC := util.GetStringOption(yamlConfig.Bridge.KoinosRpc, koinosRPCDefault)
+	koinosContract := util.GetStringOption(yamlConfig.Bridge.KoinosContract, emptyDefault)
+	// koinosBlockStart := util.GetStringOption(yamlConfig.Bridge.KoinosBlockStart, koinosBlockStartDefault)
+	// koinosMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
+	koinosPK := util.GetStringOption(yamlConfig.Bridge.KoinosPK, emptyDefault)
 
 	validators := make(map[string]string)
 	tokenAddresses := make(map[string]string)
 
-	for _, addressesStr := range *validatorsArr {
-		// first element is Koin validator address
-		// second element is Ethereum validator address
-		addresses := strings.Split(addressesStr, ":")
-
-		validators[addresses[0]] = addresses[1]
-		validators[addresses[1]] = addresses[0]
+	for _, validator := range yamlConfig.Bridge.Validators {
+		validators[validator.KoinosAddress] = validator.EthereumAddress
+		validators[validator.EthereumAddress] = validator.KoinosAddress
 	}
 
-	for _, tokensStr := range *tokenAddressesArr {
-		// first element is Koin token address
-		// second element is Ethereum token address
-		tokens := strings.Split(tokensStr, ":")
-
-		tokenAddresses[tokens[0]] = tokens[1]
-		tokenAddresses[tokens[1]] = tokens[0]
+	for _, tokenAddr := range yamlConfig.Bridge.Tokens {
+		tokenAddresses[tokenAddr.KoinosAddress] = tokenAddr.EthereumAddress
+		tokenAddresses[tokenAddr.EthereumAddress] = tokenAddr.KoinosAddress
 	}
 
-	appID := fmt.Sprintf("%s.%s", appName, *instanceID)
+	appID := fmt.Sprintf("%s.%s", appName, instanceID)
 
 	// Initialize logger
 	logFilename := path.Join(koinosUtil.GetAppDir(*baseDir, appName), logDir, appName+".log")
-	err = log.InitLogger(*logLevel, false, logFilename, appID)
+	err = log.InitLogger(logLevel, false, logFilename, appID)
 	if err != nil {
-		panic(fmt.Sprintf("Invalid log-level: %s. Please choose one of: debug, info, warn, error", *logLevel))
+		panic(fmt.Sprintf("Invalid log-level: %s. Please choose one of: debug, info, warn, error", logLevel))
 	}
 
 	// metadata store
@@ -176,7 +129,7 @@ func main() {
 	var koinosDbBackend = store.NewBadgerBackend(koinosDbOpts)
 	defer koinosDbBackend.Close()
 
-	// koinosTxStore := store.NewTransactionsStore(koinosDbBackend)
+	koinosTxStore := store.NewTransactionsStore(koinosDbBackend)
 
 	// ethereum transactions store
 	ethDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "ethereum_transactions")
@@ -191,7 +144,7 @@ func main() {
 	ethTxStore := store.NewTransactionsStore(ethDbBackend)
 
 	// Reset backend if requested
-	if *reset {
+	if reset {
 		log.Info("Resetting database")
 		err := metadataDbBackend.Reset()
 		if err != nil {
@@ -218,72 +171,52 @@ func main() {
 
 	if metadata == nil {
 		metadata = &bridge_pb.Metadata{
-			LastEthereumBlockParsed: *ethBlockStart,
+			LastEthereumBlockParsed: ethBlockStart,
 		}
 		metadataStore.Put(metadata)
 	}
 
 	log.Infof("LastEthereumBlockParsed %s", metadata.LastEthereumBlockParsed)
 
-	// AMQP init
-	client := koinosmq.NewClient(*amqp, koinosmq.ExponentialBackoff)
-	requestHandler := koinosmq.NewRequestHandler(*amqp)
-
-	client.Start()
-
-	log.Infof("starting listening amqp server %s\n", *amqp)
-
-	requestHandler.SetRPCHandler(pluginName, func(rpcType string, data []byte) ([]byte, error) {
-		return rpc.P2PHandleRPC(
-			rpcType,
-			data,
-			*ethContract,
-			*koinosContract,
-			ethTxStore,
-			validators,
-		)
-	})
-	requestHandler.SetRPCHandler(appName, func(rpcType string, data []byte) ([]byte, error) {
-		return rpc.HandleRPC(rpcType, data, ethTxStore)
-	})
-
-	requestHandler.Start()
-
-	log.Info("request handler started")
-
-	if !*noP2P {
-		log.Info("Attempting to connect to p2p...")
-		for {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			val, _ := rpc.IsConnectedToP2P(ctx, client)
-			if val {
-				log.Info("Connected to P2P")
-				break
-			}
-		}
-	}
+	// log.Info("request handler started")
 
 	// blockchains streaming
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if *ethRPC != "none" {
+	if ethRPC != "none" {
 		go ethereum.StreamEthereumBlocks(
 			ctx,
-			client,
 			metadataStore,
 			metadata.LastEthereumBlockParsed,
-			*ethRPC,
-			*ethContract,
-			*ethMaxBlocksToStream,
-			*noP2P,
-			*koinosPK,
-			*koinosContract,
+			ethRPC,
+			ethContract,
+			ethMaxBlocksToStream,
+			koinosPK,
+			koinosContract,
 			tokenAddresses,
 			ethTxStore,
+			signaturesExpiration,
 		)
 	}
+
+	// Run API server
+	go func() {
+		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/GetEthereumTransaction", api.GetEthereumTransaction)
+		mux.HandleFunc("/GetKoinosTransaction", api.GetKoinosTransaction)
+		mux.HandleFunc("/SubmitSignature", api.SubmitSignature)
+
+		httpServer := &http.Server{
+			Addr:        apiUrl,
+			Handler:     mux,
+			BaseContext: func(_ net.Listener) context.Context { return ctx },
+		}
+		if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+			log.Errorf("HTTP server ListenAndServe: %v", err)
+		}
+	}()
 
 	// Wait for a SIGINT or SIGTERM signal
 	ch := make(chan os.Signal, 1)

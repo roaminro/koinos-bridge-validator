@@ -24,10 +24,10 @@ func (backend *MapBackend) Reset() error {
 // Put adds the requested value to the database
 func (backend *MapBackend) Put(key []byte, value []byte) error {
 	if key == nil {
-		return errors.New("Cannot put a nil value key")
+		return errors.New("cannot put a nil value key")
 	}
 	if value == nil {
-		return errors.New("Cannot put a nil value")
+		return errors.New("cannot put a nil value")
 	}
 	k := hex.EncodeToString(key)
 	//fmt.Println("Putting key:", k)
@@ -38,7 +38,7 @@ func (backend *MapBackend) Put(key []byte, value []byte) error {
 // Get fetches the requested value from the database
 func (backend *MapBackend) Get(key []byte) ([]byte, error) {
 	if len(key) == 0 {
-		return nil, errors.New("Key cannot be empty")
+		return nil, errors.New("key cannot be empty")
 	}
 	k := hex.EncodeToString(key)
 	//fmt.Println("Getting key:", k)

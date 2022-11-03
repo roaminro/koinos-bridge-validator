@@ -32,7 +32,7 @@ func (backend *BadgerBackend) Reset() error {
 // Put backend setter
 func (backend *BadgerBackend) Put(key, value []byte) error {
 	if value == nil {
-		return errors.New("Cannot put a nil value")
+		return errors.New("cannot put a nil value")
 	}
 	return backend.DB.Update(func(txn *badger.Txn) error {
 		return txn.Set(key, value)

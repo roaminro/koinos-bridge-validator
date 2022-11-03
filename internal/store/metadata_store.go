@@ -16,6 +16,7 @@ const (
 type MetadataStore struct {
 	backend Backend
 	rwmutex sync.RWMutex
+	sync.Mutex
 }
 
 // NewMetadataStore creates a new MetadataStore wrapping the provided backend

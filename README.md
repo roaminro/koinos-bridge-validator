@@ -34,3 +34,6 @@ go run cmd/koinos-bridge-validator/main.go \
 ```bash
 curl --location --request POST 'http://127.0.0.1:8080/' --data-raw '{"id": 2,"jsonrpc": "2.0","method": "bridge.get_ethereum_transaction","params": {"transaction_id": "0x7cba357d8570ae424d2ca2be2df14cdfb55cd9dc557c6171ba1e43a15101f045"}}'
 ```
+
+go run cmd/koinos-bridge-validator/main.go -d "$(pwd)/node_test"
+go run cmd/koinos-bridge-validator/main.go -d "$(pwd)/node_test2"
