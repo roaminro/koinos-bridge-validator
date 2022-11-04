@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
+	"math/big"
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	log "github.com/koinos/koinos-log-golang"
 	"github.com/mr-tron/base58"
 
@@ -346,5 +348,178 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(response))
+		return
+	}
+
+	if submittedSignature.Transaction.Type == bridge_pb.TransactionType_koinos {
+		log.Infof("received Koinos tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
+		// check transaction hash
+		txIdBytes := common.FromHex(submittedSignature.Transaction.Id)
+
+		amount, err := strconv.ParseUint(submittedSignature.Transaction.Amount, 0, 64)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Invalid amount"))
+			return
+		}
+
+		ethToken := common.FromHex(submittedSignature.Transaction.EthToken)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Invalid ethToken"))
+			return
+		}
+
+		recipient := common.FromHex(submittedSignature.Transaction.Recipient)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("Invalid recipient"))
+			return
+		}
+
+		operationId, err := strconv.ParseUint(submittedSignature.Transaction.OpId, 0, 64)
+		if err != nil {
+			panic(err)
+		}
+
+		hash := crypto.Keccak256Hash(
+			common.LeftPadBytes(big.NewInt(int64(bridge_pb.ActionId_complete_transfer.Number())).Bytes(), 32),
+			txIdBytes,
+			common.LeftPadBytes(big.NewInt(int64(operationId)).Bytes(), 32),
+			ethToken,
+			recipient,
+			common.LeftPadBytes(big.NewInt(int64(amount)).Bytes(), 32),
+			api.ethContractAddress.Bytes(),
+			common.LeftPadBytes(big.NewInt(int64(submittedSignature.Transaction.Expiration)).Bytes(), 32),
+		)
+
+		prefixedHash := crypto.Keccak256Hash(
+			[]byte(fmt.Sprintf("\x19Ethereum Signed Message:\n%v", len(hash))),
+			hash.Bytes(),
+		)
+
+		if prefixedHash.Hex() != submittedSignature.Transaction.Hash {
+			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Id, submittedSignature.Transaction.Hash, prefixedHash.Hex())
+			log.Errorf(errMsg)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(errMsg))
+			return
+		}
+
+		if len(submittedSignature.Transaction.Validators) != len(submittedSignature.Transaction.Signatures) {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("mismatch number validators and signatures"))
+			return
+		}
+
+		// check signatures
+		for index, signature := range submittedSignature.Transaction.Signatures {
+			validatorReceived := submittedSignature.Transaction.Validators[index]
+
+			_, found := api.validators[validatorReceived]
+			if !found {
+				errMsg := fmt.Sprintf("validator %s is not allowed", validatorReceived)
+				log.Errorf(errMsg)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(errMsg))
+				return
+			}
+
+			signatureBytes := common.FromHex(signature)
+
+			validatorCalculated, err := crypto.Ecrecover(hash.Bytes(), signatureBytes)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("cannot recover validator address"))
+				return
+			}
+
+			if validatorReceived != common.BytesToAddress(validatorCalculated).Hex() {
+				errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
+				log.Errorf(errMsg)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(errMsg))
+				return
+			}
+		}
+
+		// check if we already have this transaction in our store
+		txKey := submittedSignature.Transaction.Id + "-" + submittedSignature.Transaction.OpId
+		api.koinosTxStore.Lock()
+		koinosTx, err := api.koinosTxStore.Get(txKey)
+		if err != nil {
+			log.Errorf(err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("error while getting transaction"))
+			api.koinosTxStore.Unlock()
+			return
+		}
+
+		response := ""
+
+		if koinosTx != nil {
+			if koinosTx.Status == bridge_pb.TransactionStatus_completed {
+				log.Error(err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("transaction already completed"))
+				api.koinosTxStore.Unlock()
+				return
+			}
+
+			if koinosTx.Hash != prefixedHash.Hex() {
+				errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Hash, koinosTx.Hash, prefixedHash.Hex())
+
+				log.Errorf(errMsg)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(errMsg))
+				api.koinosTxStore.Unlock()
+				return
+			}
+
+			signatures := make(map[string]string)
+
+			for index, validatr := range koinosTx.Validators {
+				signatures[validatr] = koinosTx.Signatures[index]
+
+				if validatr == api.koinosAddress {
+					response = koinosTx.Signatures[index]
+				}
+			}
+
+			for index, validatr := range submittedSignature.Transaction.Validators {
+				_, found := signatures[validatr]
+				if !found {
+					signatures[validatr] = submittedSignature.Transaction.Signatures[index]
+				}
+			}
+
+			koinosTx.Validators = []string{}
+			koinosTx.Signatures = []string{}
+			for val, sig := range signatures {
+				koinosTx.Validators = append(koinosTx.Validators, val)
+				koinosTx.Signatures = append(koinosTx.Signatures, sig)
+			}
+		} else {
+			koinosTx = submittedSignature.Transaction
+		}
+
+		if len(koinosTx.Signatures) >= ((((len(api.validators)/2)*10)/3)*2)/10+1 {
+			koinosTx.Status = bridge_pb.TransactionStatus_signed
+		}
+
+		err = api.koinosTxStore.Put(txKey, koinosTx)
+		api.koinosTxStore.Unlock()
+
+		if err != nil {
+			log.Errorf(err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("error while saving transaction"))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(response))
+		return
 	}
 }
