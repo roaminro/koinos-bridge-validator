@@ -1,11 +1,14 @@
 package ethereum
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"math/big"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/koinos/koinos-log-golang"
-	koinosUtil "github.com/koinos/koinos-util-golang"
 
 	"github.com/mr-tron/base58"
 
@@ -23,6 +25,7 @@ import (
 	"github.com/roaminroe/koinos-bridge-validator/internal/util"
 	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
 
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -33,24 +36,14 @@ func StreamEthereumBlocks(
 	ethRPC string,
 	ethContractStr string,
 	ethMaxBlocksToStreamStr string,
-	koinosPKStr string,
+	koinosPK []byte,
+	koinosAddress string,
 	koinosContractStr string,
-	tokenAddresses map[string]string,
+	tokenAddresses map[string]util.TokenConfig,
 	ethTxStore *store.TransactionsStore,
 	signaturesExpiration uint,
+	validators map[string]util.ValidatorConfig,
 ) {
-	koinosPK, err := koinosUtil.DecodeWIF(koinosPKStr)
-	if err != nil {
-		panic(err)
-	}
-
-	koinosKey, err := koinosUtil.NewKoinosKeysFromBytes(koinosPK)
-	koinosKeyB58 := base58.Encode(koinosKey.AddressBytes())
-
-	if err != nil {
-		panic(err)
-	}
-
 	// topic = keccak-256("LogTokensLocked(address,address,uint256,string,uint256)")
 	topic := common.HexToHash("0xdd58de01fef6397c5b9ce2dc1f605fa2dd517bf630021e009a6ecadbc0abe23f")
 	eventAbiStr := `[{
@@ -209,7 +202,7 @@ func StreamEthereumBlocks(
 					amount := event.Amount.Uint64()
 					blocktime := event.Blocktime.Uint64()
 
-					koinosToken, err := base58.Decode(tokenAddresses[ethToken])
+					koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
 					if err != nil {
 						panic(err)
 					}
@@ -255,7 +248,7 @@ func StreamEthereumBlocks(
 
 					if ethTx == nil {
 						ethTx = &bridge_pb.Transaction{}
-						ethTx.Validators = []string{koinosKeyB58}
+						ethTx.Validators = []string{koinosAddress}
 						ethTx.Signatures = []string{sigB64}
 					} else {
 						if ethTx.Hash != hashB64 {
@@ -263,7 +256,7 @@ func StreamEthereumBlocks(
 							log.Errorf(errMsg)
 							panic(fmt.Errorf(errMsg))
 						}
-						ethTx.Validators = append(ethTx.Validators, koinosKeyB58)
+						ethTx.Validators = append(ethTx.Validators, koinosAddress)
 						ethTx.Signatures = append(ethTx.Signatures, sigB64)
 					}
 
@@ -271,14 +264,51 @@ func StreamEthereumBlocks(
 					ethTx.Id = txIdHex
 					ethTx.From = ethFrom
 					ethTx.EthToken = ethToken
-					ethTx.KoinosToken = tokenAddresses[ethToken]
+					ethTx.KoinosToken = tokenAddresses[ethToken].KoinosAddress
 					ethTx.Amount = event.Amount.String()
 					ethTx.Recipient = event.Recipient
 					ethTx.Hash = hashB64
 					ethTx.BlockNumber = vLog.BlockNumber
 					ethTx.BlockTime = blocktime
 					ethTx.Expiration = expiration
-					ethTx.Status = bridge_pb.TransactionStatus_gathering_signature
+					ethTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+
+					err = ethTxStore.Put(txIdHex, ethTx)
+
+					if err != nil {
+						panic(err)
+					}
+
+					ethTxStore.Unlock()
+
+					// broadcast transaction
+					signatures, _ := broadcastTransaction(ethTx, koinosPK, koinosAddress, validators)
+
+					// update the transaction with signatures we may have gotten back from the broadcast
+					ethTxStore.Lock()
+
+					ethTx, err = ethTxStore.Get(txIdHex)
+					if err != nil {
+						panic(err)
+					}
+
+					for index, validatr := range ethTx.Validators {
+						_, found := signatures[validatr]
+						if !found {
+							signatures[validatr] = ethTx.Signatures[index]
+						}
+					}
+
+					ethTx.Validators = []string{}
+					ethTx.Signatures = []string{}
+					for val, sig := range signatures {
+						ethTx.Validators = append(ethTx.Validators, val)
+						ethTx.Signatures = append(ethTx.Signatures, sig)
+					}
+
+					if len(ethTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+						ethTx.Status = bridge_pb.TransactionStatus_signed
+					}
 
 					err = ethTxStore.Put(txIdHex, ethTx)
 
@@ -302,4 +332,75 @@ func StreamEthereumBlocks(
 			}
 		}
 	}
+}
+
+func broadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddress string, validators map[string]util.ValidatorConfig) (map[string]string, error) {
+	signatures := make(map[string]string)
+
+	txBytes, err := proto.Marshal(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := sha256.Sum256(txBytes)
+	sigBytes := util.SignKoinosHash(koinosPK, hash[:])
+	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
+
+	submittedSignature := &bridge_pb.SubmittedSignature{
+		Transaction: tx,
+		Signature:   sigB64,
+	}
+
+	submittedSignatureBytes, err := protojson.Marshal(submittedSignature)
+	if err != nil {
+		return nil, err
+	}
+
+	processedApiUrls := make(map[string]bool)
+
+	for _, validator := range validators {
+		// don't send to yourself
+		if validator.KoinosAddress == koinosAddress {
+			continue
+		}
+
+		// since the map has the validators ethereum addresses and koinos addresses as key
+		// make sure to not send twice to same node
+		_, found := processedApiUrls[validator.ApiUrl]
+		if found {
+			continue
+		}
+
+		bodyReader := bytes.NewReader(submittedSignatureBytes)
+		req, err := http.NewRequest(http.MethodPost, validator.ApiUrl+"/SubmitSignature", bodyReader)
+
+		if err != nil {
+			log.Errorf("client: could not create request: %s\n", err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		client := http.Client{
+			Timeout: 30 * time.Second,
+		}
+
+		res, err := client.Do(req)
+		if err != nil {
+			log.Errorf("client: error making http request to %s: %s\n", validator.KoinosAddress, err)
+			continue
+		}
+
+		log.Infof("broadcast %s: status code %d for tx %s\n", validator.KoinosAddress, res.StatusCode, tx.Id)
+		signatureBytes, _ := ioutil.ReadAll(res.Body)
+		signature := string(signatureBytes)
+
+		if signature != "" {
+			log.Infof("client: received signature %s\n", signatureBytes)
+			signatures[validator.KoinosAddress] = signature
+		}
+
+		processedApiUrls[validator.ApiUrl] = true
+	}
+
+	return signatures, nil
 }

@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/mr-tron/base58"
 	"github.com/roaminroe/koinos-bridge-validator/internal/api"
 	"github.com/roaminroe/koinos-bridge-validator/internal/ethereum"
 	"github.com/roaminroe/koinos-bridge-validator/internal/store"
@@ -85,17 +86,17 @@ func main() {
 	// koinosMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
 	koinosPK := util.GetStringOption(yamlConfig.Bridge.KoinosPK, emptyDefault)
 
-	validators := make(map[string]string)
-	tokenAddresses := make(map[string]string)
+	validators := make(map[string]util.ValidatorConfig)
+	tokenAddresses := make(map[string]util.TokenConfig)
 
 	for _, validator := range yamlConfig.Bridge.Validators {
-		validators[validator.KoinosAddress] = validator.EthereumAddress
-		validators[validator.EthereumAddress] = validator.KoinosAddress
+		validators[validator.KoinosAddress] = validator
+		validators[validator.EthereumAddress] = validator
 	}
 
 	for _, tokenAddr := range yamlConfig.Bridge.Tokens {
-		tokenAddresses[tokenAddr.KoinosAddress] = tokenAddr.EthereumAddress
-		tokenAddresses[tokenAddr.EthereumAddress] = tokenAddr.KoinosAddress
+		tokenAddresses[tokenAddr.KoinosAddress] = tokenAddr
+		tokenAddresses[tokenAddr.EthereumAddress] = tokenAddr
 	}
 
 	appID := fmt.Sprintf("%s.%s", appName, instanceID)
@@ -105,6 +106,19 @@ func main() {
 	err = log.InitLogger(logLevel, false, logFilename, appID)
 	if err != nil {
 		panic(fmt.Sprintf("Invalid log-level: %s. Please choose one of: debug, info, warn, error", logLevel))
+	}
+
+	// keys management
+	koinosPKbytes, err := koinosUtil.DecodeWIF(koinosPK)
+	if err != nil {
+		panic(err)
+	}
+
+	koinosKey, err := koinosUtil.NewKoinosKeysFromBytes(koinosPKbytes)
+	koinosAddress := base58.Encode(koinosKey.AddressBytes())
+
+	if err != nil {
+		panic(err)
 	}
 
 	// metadata store
@@ -192,17 +206,19 @@ func main() {
 			ethRPC,
 			ethContract,
 			ethMaxBlocksToStream,
-			koinosPK,
+			koinosPKbytes,
+			koinosAddress,
 			koinosContract,
 			tokenAddresses,
 			ethTxStore,
 			signaturesExpiration,
+			validators,
 		)
 	}
 
 	// Run API server
 	go func() {
-		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators)
+		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators, koinosAddress)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/GetEthereumTransaction", api.GetEthereumTransaction)
 		mux.HandleFunc("/GetKoinosTransaction", api.GetKoinosTransaction)

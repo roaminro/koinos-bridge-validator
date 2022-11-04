@@ -13,7 +13,7 @@ enum transaction_type {
 }
 
 enum transaction_status{
-    gathering_signature = 0;
+    gathering_signatures = 0;
     signed = 1;
     completed = 2;
 }
@@ -56,4 +56,9 @@ message complete_transfer_hash {
     uint64 amount = 5;
     bytes contract_id = 6;
     uint64 expiration = 7;
-  }
+}
+
+message submitted_signature {
+    transaction transaction = 1;
+    string signature = 2;
+}

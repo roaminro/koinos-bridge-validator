@@ -25,10 +25,11 @@ type Api struct {
 	koinosTxStore         *store.TransactionsStore
 	koinosContractAddress []byte
 	ethContractAddress    common.Address
-	validators            map[string]string
+	validators            map[string]util.ValidatorConfig
+	koinosAddress         string
 }
 
-func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.TransactionsStore, koinosContractStr string, ethContractStr string, validators map[string]string) *Api {
+func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.TransactionsStore, koinosContractStr string, ethContractStr string, validators map[string]util.ValidatorConfig, koinosAddress string) *Api {
 	ethContractAddress := common.HexToAddress(ethContractStr)
 
 	koinosContractAddress, err := base58.Decode(koinosContractStr)
@@ -42,6 +43,7 @@ func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.Transactio
 		koinosContractAddress: koinosContractAddress,
 		ethContractAddress:    ethContractAddress,
 		validators:            validators,
+		koinosAddress:         koinosAddress,
 	}
 }
 
@@ -135,7 +137,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var transaction bridge_pb.Transaction
+	var submittedSignature bridge_pb.SubmittedSignature
 	body, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
@@ -144,36 +146,60 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	println(body)
-
-	err = protojson.Unmarshal(body, &transaction)
+	err = protojson.Unmarshal(body, &submittedSignature)
 
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte("Invalid transaction json"))
+		w.Write([]byte("Invalid submittedSignature json"))
 		return
 	}
 
-	if transaction.Type == bridge_pb.TransactionType_ethereum {
-		log.Infof("received Ethereum tx %s / validators: %+q / signatures: %+q", transaction.Id, transaction.Validators, transaction.Signatures)
-		// check transaction hash
-		txIdBytes := common.FromHex(transaction.Id)
+	transactionBytes, err := proto.Marshal(submittedSignature.Transaction)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Invalid transactionBytes"))
+		return
+	}
 
-		amount, err := strconv.ParseUint(transaction.Amount, 0, 64)
+	hash := sha256.Sum256(transactionBytes)
+
+	signer, err := util.RecoverAddressFromSignature(submittedSignature.Signature, hash[:])
+	if err != nil {
+		log.Error(err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("cannot recover signer address"))
+		return
+	}
+
+	_, found := api.validators[signer]
+	if !found {
+		errMsg := fmt.Sprintf("signer %s is not allowed", signer)
+		log.Errorf(errMsg)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(errMsg))
+		return
+	}
+
+	if submittedSignature.Transaction.Type == bridge_pb.TransactionType_ethereum {
+		log.Infof("received Ethereum tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
+		// check transaction hash
+		txIdBytes := common.FromHex(submittedSignature.Transaction.Id)
+
+		amount, err := strconv.ParseUint(submittedSignature.Transaction.Amount, 0, 64)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Invalid amount"))
 			return
 		}
 
-		koinosToken, err := base58.Decode(transaction.KoinosToken)
+		koinosToken, err := base58.Decode(submittedSignature.Transaction.KoinosToken)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Invalid koinosToken"))
 			return
 		}
 
-		recipient, err := base58.Decode(transaction.Recipient)
+		recipient, err := base58.Decode(submittedSignature.Transaction.Recipient)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("Invalid recipient"))
@@ -187,7 +213,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			Recipient:     recipient,
 			Amount:        amount,
 			ContractId:    api.koinosContractAddress,
-			Expiration:    transaction.Expiration,
+			Expiration:    submittedSignature.Transaction.Expiration,
 		}
 
 		completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
@@ -200,104 +226,125 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		hash := sha256.Sum256(completeTransferHashBytes)
 		hashB64 := base64.StdEncoding.EncodeToString(hash[:])
 
-		if hashB64 != transaction.Hash {
-			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", transaction.Id, transaction.Hash, hashB64)
+		if hashB64 != submittedSignature.Transaction.Hash {
+			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Id, submittedSignature.Transaction.Hash, hashB64)
 			log.Errorf(errMsg)
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(errMsg))
 			return
 		}
 
-		if len(transaction.Validators) == len(transaction.Signatures) {
-			// check signatures
-			for index, signature := range transaction.Signatures {
-				validatorReceived := transaction.Validators[index]
+		if len(submittedSignature.Transaction.Validators) != len(submittedSignature.Transaction.Signatures) {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("mismatch number validators and signatures"))
+			return
+		}
 
-				_, found := api.validators[validatorReceived]
-				if !found {
-					errMsg := fmt.Sprintf("validator %s is not allowed", validatorReceived)
-					log.Errorf(errMsg)
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte(errMsg))
-					return
-				}
+		// check signatures
+		for index, signature := range submittedSignature.Transaction.Signatures {
+			validatorReceived := submittedSignature.Transaction.Validators[index]
 
-				validatorCalculated, err := util.RecoverAddressFromSignature(signature, hash[:])
-				if err != nil {
-					log.Error(err.Error())
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("cannot recover signature"))
-					return
-				}
-
-				if validatorReceived != validatorCalculated {
-					errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
-					log.Errorf(errMsg)
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte(errMsg))
-					return
-				}
+			_, found := api.validators[validatorReceived]
+			if !found {
+				errMsg := fmt.Sprintf("validator %s is not allowed", validatorReceived)
+				log.Errorf(errMsg)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(errMsg))
+				return
 			}
 
-			// check if we already have this transaction in our store
-			api.ethTxStore.Lock()
-			ethTx, err := api.ethTxStore.Get(transaction.Id)
+			validatorCalculated, err := util.RecoverAddressFromSignature(signature, hash[:])
 			if err != nil {
-				log.Errorf(err.Error())
+				log.Error(err.Error())
 				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("error while getting transaction"))
+				w.Write([]byte("cannot recover validator address"))
+				return
+			}
+
+			if validatorReceived != validatorCalculated {
+				errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
+				log.Errorf(errMsg)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte(errMsg))
+				return
+			}
+		}
+
+		// check if we already have this transaction in our store
+		api.ethTxStore.Lock()
+		ethTx, err := api.ethTxStore.Get(submittedSignature.Transaction.Id)
+		if err != nil {
+			log.Errorf(err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("error while getting transaction"))
+			api.ethTxStore.Unlock()
+			return
+		}
+
+		response := ""
+
+		if ethTx != nil {
+			if ethTx.Status == bridge_pb.TransactionStatus_completed {
+				log.Error(err.Error())
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("transaction already completed"))
 				api.ethTxStore.Unlock()
 				return
 			}
 
-			if ethTx != nil {
-				if ethTx.Hash != hashB64 {
-					errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one received %s != calculated %s", transaction.Hash, ethTx.Hash, hashB64)
+			if ethTx.Hash != hashB64 {
+				errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Hash, ethTx.Hash, hashB64)
 
-					log.Errorf(errMsg)
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte(errMsg))
-					api.ethTxStore.Unlock()
-					return
-				}
-
-				signatures := make(map[string]string)
-
-				for index, validatr := range ethTx.Validators {
-					signatures[validatr] = ethTx.Signatures[index]
-				}
-
-				for index, validatr := range transaction.Validators {
-					_, found := signatures[validatr]
-					if !found {
-						signatures[validatr] = transaction.Signatures[index]
-					}
-				}
-
-				ethTx.Validators = []string{}
-				ethTx.Signatures = []string{}
-				for val, sig := range signatures {
-					ethTx.Validators = append(ethTx.Validators, val)
-					ethTx.Signatures = append(ethTx.Signatures, sig)
-				}
-			} else {
-				// TODO: check if other values in transaction are legit before saving it
-				ethTx = &transaction
-			}
-
-			err = api.ethTxStore.Put(ethTx.Id, ethTx)
-			api.ethTxStore.Unlock()
-
-			if err != nil {
-				log.Errorf(err.Error())
+				log.Errorf(errMsg)
 				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("error while saving transaction"))
+				w.Write([]byte(errMsg))
+				api.ethTxStore.Unlock()
 				return
 			}
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("signature successfully processed"))
+			signatures := make(map[string]string)
+
+			for index, validatr := range ethTx.Validators {
+				signatures[validatr] = ethTx.Signatures[index]
+
+				if validatr == api.koinosAddress {
+					response = ethTx.Signatures[index]
+				}
+			}
+
+			for index, validatr := range submittedSignature.Transaction.Validators {
+				_, found := signatures[validatr]
+				if !found {
+					signatures[validatr] = submittedSignature.Transaction.Signatures[index]
+				}
+			}
+
+			ethTx.Validators = []string{}
+			ethTx.Signatures = []string{}
+			for val, sig := range signatures {
+				ethTx.Validators = append(ethTx.Validators, val)
+				ethTx.Signatures = append(ethTx.Signatures, sig)
+			}
+		} else {
+			ethTx = submittedSignature.Transaction
 		}
+
+		if len(ethTx.Signatures) >= ((((len(api.validators)/2)*10)/3)*2)/10+1 {
+			ethTx.Status = bridge_pb.TransactionStatus_signed
+		}
+
+		err = api.ethTxStore.Put(ethTx.Id, ethTx)
+		api.ethTxStore.Unlock()
+
+		if err != nil {
+			log.Errorf(err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("error while saving transaction"))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(response))
 	}
 }
