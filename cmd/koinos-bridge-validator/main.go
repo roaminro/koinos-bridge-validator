@@ -11,12 +11,12 @@ import (
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/api"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/ethereum"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/store"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/util"
+	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 	"github.com/mr-tron/base58"
-	"github.com/roaminroe/koinos-bridge-validator/internal/api"
-	"github.com/roaminroe/koinos-bridge-validator/internal/ethereum"
-	"github.com/roaminroe/koinos-bridge-validator/internal/store"
-	"github.com/roaminroe/koinos-bridge-validator/internal/util"
-	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
 
 	log "github.com/koinos/koinos-log-golang"
 	koinosUtil "github.com/koinos/koinos-util-golang"

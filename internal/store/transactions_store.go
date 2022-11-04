@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
+	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 	"google.golang.org/protobuf/proto"
 )
 

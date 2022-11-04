@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package bridge;
-option go_package = "github.com/roaminroe/koinos-bridge-validator/bridge_pb";
+option go_package = "github.com/koinos-bridge/koinos-bridge-validator/bridge_pb";
 
 message metadata {
     string last_ethereum_block_parsed = 1;

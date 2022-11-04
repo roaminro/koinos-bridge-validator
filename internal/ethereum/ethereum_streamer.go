@@ -21,9 +21,9 @@ import (
 
 	"github.com/mr-tron/base58"
 
-	"github.com/roaminroe/koinos-bridge-validator/internal/store"
-	"github.com/roaminroe/koinos-bridge-validator/internal/util"
-	"github.com/roaminroe/koinos-bridge-validator/proto/build/github.com/roaminroe/koinos-bridge-validator/bridge_pb"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/store"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/util"
+	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
