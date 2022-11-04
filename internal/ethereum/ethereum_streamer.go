@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/koinos/koinos-log-golang"
 
@@ -44,8 +45,7 @@ func StreamEthereumBlocks(
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
 ) {
-	// topic = keccak-256("LogTokensLocked(address,address,uint256,string,uint256)")
-	topic := common.HexToHash("0xdd58de01fef6397c5b9ce2dc1f605fa2dd517bf630021e009a6ecadbc0abe23f")
+	topic := crypto.Keccak256Hash([]byte("LogTokensLocked(address,address,uint256,string,uint256)"))
 	eventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
