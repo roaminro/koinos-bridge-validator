@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strconv"
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/api"
-	"github.com/koinos-bridge/koinos-bridge-validator/internal/ethereum"
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/store"
+	"github.com/koinos-bridge/koinos-bridge-validator/internal/streamer"
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/util"
 	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 	"github.com/mr-tron/base58"
@@ -59,7 +61,7 @@ func main() {
 	flag.Parse()
 
 	var err error
-	*baseDir = koinosUtil.InitBaseDir(*baseDir)
+	*baseDir, err = koinosUtil.InitBaseDir(*baseDir)
 	if err != nil {
 		panic(fmt.Sprintf("Could not initialize baseDir: %s", *baseDir))
 	}
@@ -78,12 +80,12 @@ func main() {
 	ethContract := util.GetStringOption(yamlConfig.Bridge.EthereumContract, emptyDefault)
 	ethBlockStart := util.GetStringOption(yamlConfig.Bridge.EthereumBlockStart, ethBlockStartDefault)
 	ethMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.EthereumMaxBlocksStream, ethMaxBlocksToStreamDefault)
-	// ethPK := util.GetStringOption(yamlConfig.Bridge.EthereumPK, emptyDefault)
+	ethPK := util.GetStringOption(yamlConfig.Bridge.EthereumPK, emptyDefault)
 
-	// koinosRPC := util.GetStringOption(yamlConfig.Bridge.KoinosRpc, koinosRPCDefault)
+	koinosRPC := util.GetStringOption(yamlConfig.Bridge.KoinosRpc, koinosRPCDefault)
 	koinosContract := util.GetStringOption(yamlConfig.Bridge.KoinosContract, emptyDefault)
-	// koinosBlockStart := util.GetStringOption(yamlConfig.Bridge.KoinosBlockStart, koinosBlockStartDefault)
-	// koinosMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
+	koinosBlockStart := util.GetStringOption(yamlConfig.Bridge.KoinosBlockStart, koinosBlockStartDefault)
+	koinosMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
 	koinosPK := util.GetStringOption(yamlConfig.Bridge.KoinosPK, emptyDefault)
 
 	validators := make(map[string]util.ValidatorConfig)
@@ -120,6 +122,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	ethPrivateKey, err := crypto.HexToECDSA(ethPK)
+	if err != nil {
+		panic(err)
+	}
+	ethAddress := crypto.PubkeyToAddress(ethPrivateKey.PublicKey).Hex()
 
 	// metadata store
 	metadataDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "metadata")
@@ -186,26 +194,50 @@ func main() {
 	if metadata == nil {
 		metadata = &bridge_pb.Metadata{
 			LastEthereumBlockParsed: ethBlockStart,
+			LastKoinosBlockParsed:   koinosBlockStart,
 		}
 		metadataStore.Put(metadata)
 	}
 
 	log.Infof("LastEthereumBlockParsed %s", metadata.LastEthereumBlockParsed)
-
-	// log.Info("request handler started")
+	log.Infof("LastKoinosBlockParsed %s", metadata.LastKoinosBlockParsed)
 
 	// blockchains streaming
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	if ethRPC != "none" {
-		go ethereum.StreamEthereumBlocks(
+	ethMaxBlocksToStreamU64, _ := strconv.ParseUint(ethMaxBlocksToStream, 0, 64)
+	koinosMaxBlocksToStreamU64, _ := strconv.ParseUint(koinosMaxBlocksToStream, 0, 64)
+
+	if ethMaxBlocksToStreamU64 > 0 {
+		go streamer.StreamEthereumBlocks(
 			ctx,
 			metadataStore,
 			metadata.LastEthereumBlockParsed,
 			ethRPC,
 			ethContract,
 			ethMaxBlocksToStream,
+			koinosPKbytes,
+			koinosAddress,
+			koinosContract,
+			tokenAddresses,
+			ethTxStore,
+			koinosTxStore,
+			signaturesExpiration,
+			validators,
+		)
+	}
+
+	if koinosMaxBlocksToStreamU64 > 0 {
+		go streamer.StreamKoinosBlocks(
+			ctx,
+			metadataStore,
+			metadata.LastKoinosBlockParsed,
+			koinosRPC,
+			ethPrivateKey,
+			ethAddress,
+			ethContract,
+			koinosMaxBlocksToStream,
 			koinosPKbytes,
 			koinosAddress,
 			koinosContract,

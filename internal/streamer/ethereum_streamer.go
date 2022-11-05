@@ -1,14 +1,11 @@
-package ethereum
+package streamer
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"math/big"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +24,6 @@ import (
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/util"
 	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -47,8 +43,8 @@ func StreamEthereumBlocks(
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
 ) {
-	logTokensLockedTopic := crypto.Keccak256Hash([]byte("LogTokensLocked(address,address,uint256,string,uint256)"))
-	logTokensLockedAbiStr := `[{
+	tokensLockedEventTopic := crypto.Keccak256Hash([]byte("TokensLockedEvent(address,address,uint256,string,uint256)"))
+	tokensLockedEventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
 		  {
@@ -82,18 +78,18 @@ func StreamEthereumBlocks(
 			"type": "uint256"
 		  }
 		],
-		"name": "LogTokensLocked",
+		"name": "TokensLockedEvent",
 		"type": "event"
 	  }]`
 
-	logTokensLockedAbi, err := abi.JSON(strings.NewReader(logTokensLockedAbiStr))
+	tokensLockedEventAbi, err := abi.JSON(strings.NewReader(tokensLockedEventAbiStr))
 
 	if err != nil {
 		panic(err)
 	}
 
-	logTransferCompletedTopic := crypto.Keccak256Hash([]byte("LogTransferCompleted(bytes,uint256,address)"))
-	logTransferCompletedAbiStr := `[{
+	transferCompletedEventTopic := crypto.Keccak256Hash([]byte("TransferCompletedEvent(bytes,uint256)"))
+	transferCompletedEventAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
 		  {
@@ -107,19 +103,13 @@ func StreamEthereumBlocks(
 			"internalType": "uint256",
 			"name": "operationId",
 			"type": "uint256"
-		  },
-		  {
-			"indexed": false,
-			"internalType": "address",
-			"name": "caller",
-			"type": "address"
 		  }
 		],
-		"name": "LogTransferCompleted",
+		"name": "TransferCompletedEvent",
 		"type": "event"
 	  }]`
 
-	logTransferCompletedAbi, err := abi.JSON(strings.NewReader(logTransferCompletedAbiStr))
+	transferCompletedEventAbi, err := abi.JSON(strings.NewReader(transferCompletedEventAbiStr))
 
 	if err != nil {
 		panic(err)
@@ -159,7 +149,7 @@ func StreamEthereumBlocks(
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infof("stop streaming logs")
+			log.Infof("stop streaming logs: %d", lastEthereumBlockParsed)
 			metadataStore.Lock()
 			defer metadataStore.Unlock()
 
@@ -167,8 +157,6 @@ func StreamEthereumBlocks(
 			if err != nil {
 				panic(err)
 			}
-
-			log.Infof("stop streaming logs %d", metadata.LastEthereumBlockParsed)
 
 			metadata.LastEthereumBlockParsed = strconv.FormatUint(lastEthereumBlockParsed, 10)
 
@@ -205,8 +193,8 @@ func StreamEthereumBlocks(
 					},
 					Topics: [][]common.Hash{
 						{
-							logTokensLockedTopic,
-							logTransferCompletedTopic,
+							tokensLockedEventTopic,
+							transferCompletedEventTopic,
 						},
 					},
 				}
@@ -224,8 +212,8 @@ func StreamEthereumBlocks(
 					}
 
 					// if LogTokensLocked
-					if vLog.Topics[0] == logTokensLockedTopic {
-						processTokensLockedEvent(
+					if vLog.Topics[0] == tokensLockedEventTopic {
+						processEthereumTokensLockedEvent(
 							koinosPK,
 							koinosAddress,
 							koinosContractAddr,
@@ -234,14 +222,14 @@ func StreamEthereumBlocks(
 							signaturesExpiration,
 							validators,
 							vLog,
-							logTokensLockedAbi,
+							tokensLockedEventAbi,
 						)
-					} else if vLog.Topics[0] == logTransferCompletedTopic {
+					} else if vLog.Topics[0] == transferCompletedEventTopic {
 						// if LogTransferCompleted
-						processTransferCompletedEvent(
+						processEthereumTransferCompletedEvent(
 							koinosTxStore,
 							vLog,
-							logTransferCompletedAbi,
+							transferCompletedEventAbi,
 						)
 					}
 
@@ -261,7 +249,7 @@ func StreamEthereumBlocks(
 	}
 }
 
-func processTransferCompletedEvent(
+func processEthereumTransferCompletedEvent(
 	koinosTxStore *store.TransactionsStore,
 	vLog types.Log,
 	eventAbi abi.ABI,
@@ -270,10 +258,9 @@ func processTransferCompletedEvent(
 	event := struct {
 		TxId        []byte
 		OperationId *big.Int
-		Caller      common.Address
 	}{}
 
-	err := eventAbi.UnpackIntoInterface(&event, "LogTransferCompleted", vLog.Data)
+	err := eventAbi.UnpackIntoInterface(&event, "TransferCompletedEvent", vLog.Data)
 	if err != nil {
 		panic(err)
 	}
@@ -282,9 +269,8 @@ func processTransferCompletedEvent(
 	ethTxId := vLog.TxHash.Hex()
 	koinosTxId := common.Bytes2Hex(event.TxId)
 	koinosOpId := event.OperationId.String()
-	caller := event.Caller.Hex()
 
-	log.Infof("new Eth LogTransferCompleted event | block: %s | tx: %s | koinos tx: %s | koinos op: %s | caller: %s ", blockNumber, ethTxId, koinosTxId, koinosOpId, caller)
+	log.Infof("new Eth LogTransferCompleted event | block: %s | tx: %s | koinos tx: %s | koinos op: %s", blockNumber, ethTxId, koinosTxId, koinosOpId)
 
 	txKey := koinosTxId + "-" + koinosOpId
 	koinosTxStore.Lock()
@@ -307,7 +293,7 @@ func processTransferCompletedEvent(
 	koinosTxStore.Unlock()
 }
 
-func processTokensLockedEvent(
+func processEthereumTokensLockedEvent(
 	koinosPK []byte,
 	koinosAddress string,
 	koinosContractAddr []byte,
@@ -327,7 +313,7 @@ func processTokensLockedEvent(
 		Blocktime *big.Int
 	}{}
 
-	err := eventAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
+	err := eventAbi.UnpackIntoInterface(&event, "TokensLockedEvent", vLog.Data)
 	if err != nil {
 		panic(err)
 	}
@@ -350,12 +336,12 @@ func processTokensLockedEvent(
 		panic(err)
 	}
 
-	log.Infof("new Eth LogTokensLocked event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
+	log.Infof("new Eth TokensLockedEvent | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken].KoinosAddress, ethFrom, event.Recipient, event.Amount.String())
 
 	expiration := blocktime + uint64(signaturesExpiration)
 
 	// sign the transaction
-	completeTransferHash := &bridge_pb.CompleteTransferHash{
+	completeTransferHash := &bridge_pb.EthereumCompleteTransferHash{
 		Action:        bridge_pb.ActionId_complete_transfer,
 		TransactionId: txId,
 		Token:         koinosToken,
@@ -420,7 +406,7 @@ func processTokensLockedEvent(
 	ethTxStore.Unlock()
 
 	// broadcast transaction
-	signatures, _ := broadcastTransaction(ethTx, koinosPK, koinosAddress, validators)
+	signatures, _ := util.BroadcastTransaction(ethTx, koinosPK, koinosAddress, validators)
 
 	// update the transaction with signatures we may have gotten back from the broadcast
 	ethTxStore.Lock()
@@ -455,75 +441,4 @@ func processTokensLockedEvent(
 	}
 
 	ethTxStore.Unlock()
-}
-
-func broadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddress string, validators map[string]util.ValidatorConfig) (map[string]string, error) {
-	signatures := make(map[string]string)
-
-	txBytes, err := proto.Marshal(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	hash := sha256.Sum256(txBytes)
-	sigBytes := util.SignKoinosHash(koinosPK, hash[:])
-	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
-
-	submittedSignature := &bridge_pb.SubmittedSignature{
-		Transaction: tx,
-		Signature:   sigB64,
-	}
-
-	submittedSignatureBytes, err := protojson.Marshal(submittedSignature)
-	if err != nil {
-		return nil, err
-	}
-
-	processedApiUrls := make(map[string]bool)
-
-	for _, validator := range validators {
-		// don't send to yourself
-		if validator.KoinosAddress == koinosAddress {
-			continue
-		}
-
-		// since the map has the validators ethereum addresses and koinos addresses as key
-		// make sure to not send twice to same node
-		_, found := processedApiUrls[validator.ApiUrl]
-		if found {
-			continue
-		}
-
-		bodyReader := bytes.NewReader(submittedSignatureBytes)
-		req, err := http.NewRequest(http.MethodPost, validator.ApiUrl+"/SubmitSignature", bodyReader)
-
-		if err != nil {
-			log.Errorf("client: could not create request: %s\n", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		client := http.Client{
-			Timeout: 30 * time.Second,
-		}
-
-		res, err := client.Do(req)
-		if err != nil {
-			log.Errorf("client: error making http request to %s: %s\n", validator.KoinosAddress, err)
-			continue
-		}
-
-		log.Infof("broadcast %s: status code %d for tx %s\n", validator.KoinosAddress, res.StatusCode, tx.Id)
-		signatureBytes, _ := ioutil.ReadAll(res.Body)
-		signature := string(signatureBytes)
-
-		if signature != "" {
-			log.Infof("client: received signature %s\n", signatureBytes)
-			signatures[validator.KoinosAddress] = signature
-		}
-
-		processedApiUrls[validator.ApiUrl] = true
-	}
-
-	return signatures, nil
 }

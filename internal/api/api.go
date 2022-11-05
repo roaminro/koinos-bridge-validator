@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
-	"math/big"
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -208,7 +207,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		completeTransferHash := &bridge_pb.CompleteTransferHash{
+		completeTransferHash := &bridge_pb.EthereumCompleteTransferHash{
 			Action:        bridge_pb.ActionId_complete_transfer,
 			TransactionId: txIdBytes,
 			Token:         koinosToken,
@@ -382,21 +381,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 
-		hash := crypto.Keccak256Hash(
-			common.LeftPadBytes(big.NewInt(int64(bridge_pb.ActionId_complete_transfer.Number())).Bytes(), 32),
-			txIdBytes,
-			common.LeftPadBytes(big.NewInt(int64(operationId)).Bytes(), 32),
-			ethToken,
-			recipient,
-			common.LeftPadBytes(big.NewInt(int64(amount)).Bytes(), 32),
-			api.ethContractAddress.Bytes(),
-			common.LeftPadBytes(big.NewInt(int64(submittedSignature.Transaction.Expiration)).Bytes(), 32),
-		)
-
-		prefixedHash := crypto.Keccak256Hash(
-			[]byte(fmt.Sprintf("\x19Ethereum Signed Message:\n%v", len(hash))),
-			hash.Bytes(),
-		)
+		hash, prefixedHash := util.GenerateEthereumCompleteTransferHash(txIdBytes, operationId, ethToken, recipient, amount, api.ethContractAddress, submittedSignature.Transaction.Expiration)
 
 		if prefixedHash.Hex() != submittedSignature.Transaction.Hash {
 			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Id, submittedSignature.Transaction.Hash, prefixedHash.Hex())

@@ -5,6 +5,7 @@ option go_package = "github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 
 message metadata {
     string last_ethereum_block_parsed = 1;
+    string last_koinos_block_parsed = 2;
 }
 
 enum transaction_type {
@@ -63,3 +64,15 @@ message submitted_signature {
     transaction transaction = 1;
     string signature = 2;
 }
+
+message tokens_locked_event {
+    bytes from = 1;
+    bytes token = 2;
+    uint64 amount = 3;
+    string recipient = 4;
+  }
+  
+  message transfer_completed_event {
+    bytes tx_id = 1;
+  }
+  
