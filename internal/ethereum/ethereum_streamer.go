@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	log "github.com/koinos/koinos-log-golang"
@@ -42,11 +43,12 @@ func StreamEthereumBlocks(
 	koinosContractStr string,
 	tokenAddresses map[string]util.TokenConfig,
 	ethTxStore *store.TransactionsStore,
+	koinosTxStore *store.TransactionsStore,
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
 ) {
-	topic := crypto.Keccak256Hash([]byte("LogTokensLocked(address,address,uint256,string,uint256)"))
-	eventAbiStr := `[{
+	logTokensLockedTopic := crypto.Keccak256Hash([]byte("LogTokensLocked(address,address,uint256,string,uint256)"))
+	logTokensLockedAbiStr := `[{
 		"anonymous": false,
 		"inputs": [
 		  {
@@ -84,7 +86,40 @@ func StreamEthereumBlocks(
 		"type": "event"
 	  }]`
 
-	eventAbi, err := abi.JSON(strings.NewReader(eventAbiStr))
+	logTokensLockedAbi, err := abi.JSON(strings.NewReader(logTokensLockedAbiStr))
+
+	if err != nil {
+		panic(err)
+	}
+
+	logTransferCompletedTopic := crypto.Keccak256Hash([]byte("LogTransferCompleted(bytes,uint256,address)"))
+	logTransferCompletedAbiStr := `[{
+		"anonymous": false,
+		"inputs": [
+		  {
+			"indexed": false,
+			"internalType": "bytes",
+			"name": "txId",
+			"type": "bytes"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "uint256",
+			"name": "operationId",
+			"type": "uint256"
+		  },
+		  {
+			"indexed": false,
+			"internalType": "address",
+			"name": "caller",
+			"type": "address"
+		  }
+		],
+		"name": "LogTransferCompleted",
+		"type": "event"
+	  }]`
+
+	logTransferCompletedAbi, err := abi.JSON(strings.NewReader(logTransferCompletedAbiStr))
 
 	if err != nil {
 		panic(err)
@@ -169,7 +204,10 @@ func StreamEthereumBlocks(
 						ethContractAddr,
 					},
 					Topics: [][]common.Hash{
-						{topic},
+						{
+							logTokensLockedTopic,
+							logTransferCompletedTopic,
+						},
 					},
 				}
 				log.Infof("fetched eth logs: %d - %d", fromBlock, toBlock)
@@ -180,143 +218,32 @@ func StreamEthereumBlocks(
 				}
 
 				for _, vLog := range logs {
-					// parse event
-					event := struct {
-						Token     common.Address
-						From      common.Address
-						Recipient string
-						Amount    *big.Int
-						Blocktime *big.Int
-					}{}
-
-					err := eventAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
-					if err != nil {
-						panic(err)
+					// do not processed removed logs
+					if vLog.Removed {
+						continue
 					}
 
-					blockNumber := fmt.Sprint(vLog.BlockNumber)
-					txId := vLog.TxHash.Bytes()
-					txIdHex := vLog.TxHash.Hex()
-					ethFrom := event.From.Hex()
-					ethToken := event.Token.Hex()
-					amount := event.Amount.Uint64()
-					blocktime := event.Blocktime.Uint64()
-
-					koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
-					if err != nil {
-						panic(err)
+					// if LogTokensLocked
+					if vLog.Topics[0] == logTokensLockedTopic {
+						processTokensLockedEvent(
+							koinosPK,
+							koinosAddress,
+							koinosContractAddr,
+							tokenAddresses,
+							ethTxStore,
+							signaturesExpiration,
+							validators,
+							vLog,
+							logTokensLockedAbi,
+						)
+					} else if vLog.Topics[0] == logTransferCompletedTopic {
+						// if LogTransferCompleted
+						processTransferCompletedEvent(
+							koinosTxStore,
+							vLog,
+							logTransferCompletedAbi,
+						)
 					}
-
-					recipient, err := base58.Decode(event.Recipient)
-					if err != nil {
-						panic(err)
-					}
-
-					log.Infof("new Eth event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
-
-					expiration := blocktime + uint64(signaturesExpiration)
-
-					// sign the transaction
-					completeTransferHash := &bridge_pb.CompleteTransferHash{
-						Action:        bridge_pb.ActionId_complete_transfer,
-						TransactionId: txId,
-						Token:         koinosToken,
-						Recipient:     recipient,
-						Amount:        amount,
-						ContractId:    koinosContractAddr,
-						Expiration:    expiration,
-					}
-
-					completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
-					if err != nil {
-						panic(err)
-					}
-
-					hash := sha256.Sum256(completeTransferHashBytes)
-					hashB64 := base64.StdEncoding.EncodeToString(hash[:])
-
-					sigBytes := util.SignKoinosHash(koinosPK, hash[:])
-					sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
-
-					// store the transaction
-					ethTxStore.Lock()
-
-					ethTx, err := ethTxStore.Get(txIdHex)
-					if err != nil {
-						panic(err)
-					}
-
-					if ethTx == nil {
-						ethTx = &bridge_pb.Transaction{}
-						ethTx.Validators = []string{koinosAddress}
-						ethTx.Signatures = []string{sigB64}
-					} else {
-						if ethTx.Hash != hashB64 {
-							errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one already received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
-							log.Errorf(errMsg)
-							panic(fmt.Errorf(errMsg))
-						}
-						ethTx.Validators = append(ethTx.Validators, koinosAddress)
-						ethTx.Signatures = append(ethTx.Signatures, sigB64)
-					}
-
-					ethTx.Type = bridge_pb.TransactionType_ethereum
-					ethTx.Id = txIdHex
-					ethTx.From = ethFrom
-					ethTx.EthToken = ethToken
-					ethTx.KoinosToken = tokenAddresses[ethToken].KoinosAddress
-					ethTx.Amount = event.Amount.String()
-					ethTx.Recipient = event.Recipient
-					ethTx.Hash = hashB64
-					ethTx.BlockNumber = vLog.BlockNumber
-					ethTx.BlockTime = blocktime
-					ethTx.Expiration = expiration
-					ethTx.Status = bridge_pb.TransactionStatus_gathering_signatures
-
-					err = ethTxStore.Put(txIdHex, ethTx)
-
-					if err != nil {
-						panic(err)
-					}
-
-					ethTxStore.Unlock()
-
-					// broadcast transaction
-					signatures, _ := broadcastTransaction(ethTx, koinosPK, koinosAddress, validators)
-
-					// update the transaction with signatures we may have gotten back from the broadcast
-					ethTxStore.Lock()
-
-					ethTx, err = ethTxStore.Get(txIdHex)
-					if err != nil {
-						panic(err)
-					}
-
-					for index, validatr := range ethTx.Validators {
-						_, found := signatures[validatr]
-						if !found {
-							signatures[validatr] = ethTx.Signatures[index]
-						}
-					}
-
-					ethTx.Validators = []string{}
-					ethTx.Signatures = []string{}
-					for val, sig := range signatures {
-						ethTx.Validators = append(ethTx.Validators, val)
-						ethTx.Signatures = append(ethTx.Signatures, sig)
-					}
-
-					if len(ethTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
-						ethTx.Status = bridge_pb.TransactionStatus_signed
-					}
-
-					err = ethTxStore.Put(txIdHex, ethTx)
-
-					if err != nil {
-						panic(err)
-					}
-
-					ethTxStore.Unlock()
 
 					lastEthereumBlockParsed = vLog.BlockNumber
 				}
@@ -332,6 +259,202 @@ func StreamEthereumBlocks(
 			}
 		}
 	}
+}
+
+func processTransferCompletedEvent(
+	koinosTxStore *store.TransactionsStore,
+	vLog types.Log,
+	eventAbi abi.ABI,
+) {
+	// parse event
+	event := struct {
+		TxId        []byte
+		OperationId *big.Int
+		Caller      common.Address
+	}{}
+
+	err := eventAbi.UnpackIntoInterface(&event, "LogTransferCompleted", vLog.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	blockNumber := fmt.Sprint(vLog.BlockNumber)
+	ethTxId := vLog.TxHash.Hex()
+	koinosTxId := common.Bytes2Hex(event.TxId)
+	koinosOpId := event.OperationId.String()
+	caller := event.Caller.Hex()
+
+	log.Infof("new Eth LogTransferCompleted event | block: %s | tx: %s | koinos tx: %s | koinos op: %s | caller: %s ", blockNumber, ethTxId, koinosTxId, koinosOpId, caller)
+
+	txKey := koinosTxId + "-" + koinosOpId
+	koinosTxStore.Lock()
+	koinosTx, err := koinosTxStore.Get(txKey)
+	if err != nil {
+		panic(err)
+	}
+
+	if koinosTx == nil {
+		log.Errorf("koinos transaction %s - op %s does not exist", koinosTxId, koinosOpId)
+	} else {
+		koinosTx.Status = bridge_pb.TransactionStatus_completed
+		koinosTx.CompletionTransactionId = ethTxId
+	}
+
+	err = koinosTxStore.Put(txKey, koinosTx)
+	if err != nil {
+		panic(err)
+	}
+	koinosTxStore.Unlock()
+}
+
+func processTokensLockedEvent(
+	koinosPK []byte,
+	koinosAddress string,
+	koinosContractAddr []byte,
+	tokenAddresses map[string]util.TokenConfig,
+	ethTxStore *store.TransactionsStore,
+	signaturesExpiration uint,
+	validators map[string]util.ValidatorConfig,
+	vLog types.Log,
+	eventAbi abi.ABI,
+) {
+	// parse event
+	event := struct {
+		Token     common.Address
+		From      common.Address
+		Recipient string
+		Amount    *big.Int
+		Blocktime *big.Int
+	}{}
+
+	err := eventAbi.UnpackIntoInterface(&event, "LogTokensLocked", vLog.Data)
+	if err != nil {
+		panic(err)
+	}
+
+	blockNumber := fmt.Sprint(vLog.BlockNumber)
+	txId := vLog.TxHash.Bytes()
+	txIdHex := vLog.TxHash.Hex()
+	ethFrom := event.From.Hex()
+	ethToken := event.Token.Hex()
+	amount := event.Amount.Uint64()
+	blocktime := event.Blocktime.Uint64()
+
+	koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
+	if err != nil {
+		panic(err)
+	}
+
+	recipient, err := base58.Decode(event.Recipient)
+	if err != nil {
+		panic(err)
+	}
+
+	log.Infof("new Eth LogTokensLocked event | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken], ethFrom, event.Recipient, event.Amount.String())
+
+	expiration := blocktime + uint64(signaturesExpiration)
+
+	// sign the transaction
+	completeTransferHash := &bridge_pb.CompleteTransferHash{
+		Action:        bridge_pb.ActionId_complete_transfer,
+		TransactionId: txId,
+		Token:         koinosToken,
+		Recipient:     recipient,
+		Amount:        amount,
+		ContractId:    koinosContractAddr,
+		Expiration:    expiration,
+	}
+
+	completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
+	if err != nil {
+		panic(err)
+	}
+
+	hash := sha256.Sum256(completeTransferHashBytes)
+	hashB64 := base64.StdEncoding.EncodeToString(hash[:])
+
+	sigBytes := util.SignKoinosHash(koinosPK, hash[:])
+	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
+
+	// store the transaction
+	ethTxStore.Lock()
+
+	ethTx, err := ethTxStore.Get(txIdHex)
+	if err != nil {
+		panic(err)
+	}
+
+	if ethTx == nil {
+		ethTx = &bridge_pb.Transaction{}
+		ethTx.Validators = []string{koinosAddress}
+		ethTx.Signatures = []string{sigB64}
+	} else {
+		if ethTx.Hash != hashB64 {
+			errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one already received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
+			log.Errorf(errMsg)
+			panic(fmt.Errorf(errMsg))
+		}
+		ethTx.Validators = append(ethTx.Validators, koinosAddress)
+		ethTx.Signatures = append(ethTx.Signatures, sigB64)
+	}
+
+	ethTx.Type = bridge_pb.TransactionType_ethereum
+	ethTx.Id = txIdHex
+	ethTx.From = ethFrom
+	ethTx.EthToken = ethToken
+	ethTx.KoinosToken = tokenAddresses[ethToken].KoinosAddress
+	ethTx.Amount = event.Amount.String()
+	ethTx.Recipient = event.Recipient
+	ethTx.Hash = hashB64
+	ethTx.BlockNumber = vLog.BlockNumber
+	ethTx.BlockTime = blocktime
+	ethTx.Expiration = expiration
+	ethTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+
+	err = ethTxStore.Put(txIdHex, ethTx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	ethTxStore.Unlock()
+
+	// broadcast transaction
+	signatures, _ := broadcastTransaction(ethTx, koinosPK, koinosAddress, validators)
+
+	// update the transaction with signatures we may have gotten back from the broadcast
+	ethTxStore.Lock()
+
+	ethTx, err = ethTxStore.Get(txIdHex)
+	if err != nil {
+		panic(err)
+	}
+
+	for index, validatr := range ethTx.Validators {
+		_, found := signatures[validatr]
+		if !found {
+			signatures[validatr] = ethTx.Signatures[index]
+		}
+	}
+
+	ethTx.Validators = []string{}
+	ethTx.Signatures = []string{}
+	for val, sig := range signatures {
+		ethTx.Validators = append(ethTx.Validators, val)
+		ethTx.Signatures = append(ethTx.Signatures, sig)
+	}
+
+	if len(ethTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+		ethTx.Status = bridge_pb.TransactionStatus_signed
+	}
+
+	err = ethTxStore.Put(txIdHex, ethTx)
+
+	if err != nil {
+		panic(err)
+	}
+
+	ethTxStore.Unlock()
 }
 
 func broadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddress string, validators map[string]util.ValidatorConfig) (map[string]string, error) {

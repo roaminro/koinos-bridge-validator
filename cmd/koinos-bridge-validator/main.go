@@ -211,6 +211,7 @@ func main() {
 			koinosContract,
 			tokenAddresses,
 			ethTxStore,
+			koinosTxStore,
 			signaturesExpiration,
 			validators,
 		)

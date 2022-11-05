@@ -34,6 +34,7 @@ message transaction {
     repeated string validators = 13;
     repeated string signatures = 14;
     transaction_status status = 15;
+    string completion_transaction_id = 16;
 }
 
 enum action_id {
