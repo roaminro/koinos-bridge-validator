@@ -39,6 +39,7 @@ const (
 	ethRPCDefault               = "http://127.0.0.1:8545/"
 	ethBlockStartDefault        = "0"
 	ethMaxBlocksToStreamDefault = "500"
+	ethConfirmationsDefault     = "25"
 
 	koinosRPCDefault               = "http://127.0.0.1:8080/"
 	koinosBlockStartDefault        = "0"
@@ -80,6 +81,7 @@ func main() {
 	ethContract := util.GetStringOption(yamlConfig.Bridge.EthereumContract, emptyDefault)
 	ethBlockStart := util.GetStringOption(yamlConfig.Bridge.EthereumBlockStart, ethBlockStartDefault)
 	ethMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.EthereumMaxBlocksStream, ethMaxBlocksToStreamDefault)
+	ethConfirmations := util.GetStringOption(yamlConfig.Bridge.EthereumConfirmations, ethConfirmationsDefault)
 	ethPK := util.GetStringOption(yamlConfig.Bridge.EthereumPK, emptyDefault)
 
 	koinosRPC := util.GetStringOption(yamlConfig.Bridge.KoinosRpc, koinosRPCDefault)
@@ -227,6 +229,7 @@ func main() {
 			koinosTxStore,
 			signaturesExpiration,
 			validators,
+			ethConfirmations,
 		)
 	}
 

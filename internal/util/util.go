@@ -50,6 +50,7 @@ type BridgeConfig struct {
 	EthereumBlockStart      string `yaml:"ethereum-block-start"`
 	EthereumPK              string `yaml:"ethereum-pk"`
 	EthereumMaxBlocksStream string `yaml:"ethereum-max-blocks-stream"`
+	EthereumConfirmations   string `yaml:"ethereum-confirmations"`
 
 	KoinosRpc             string `yaml:"koinos-rpc"`
 	KoinosContract        string `yaml:"koinos-contract"`

@@ -42,6 +42,7 @@ func StreamEthereumBlocks(
 	koinosTxStore *store.TransactionsStore,
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
+	ethConfirmationsStr string,
 ) {
 	tokensLockedEventTopic := crypto.Keccak256Hash([]byte("TokensLockedEvent(address,address,uint256,string,uint256)"))
 	tokensLockedEventAbiStr := `[{
@@ -135,6 +136,11 @@ func StreamEthereumBlocks(
 		panic(err)
 	}
 
+	ethConfirmations, err := strconv.ParseUint(ethConfirmationsStr, 0, 64)
+	if err != nil {
+		panic(err)
+	}
+
 	startBlock++
 
 	ethContractAddr := common.HexToAddress(ethContractStr)
@@ -165,8 +171,8 @@ func StreamEthereumBlocks(
 
 		case <-time.After(time.Millisecond * 1000):
 			latestblock, err := ethCl.BlockNumber(ctx)
-			// trail by 25 blocks
-			latestblock = latestblock - 25
+			// trail by ethConfirmations blocks
+			latestblock = latestblock - ethConfirmations
 
 			if err != nil {
 				panic(err)
