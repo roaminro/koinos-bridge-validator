@@ -165,6 +165,8 @@ func StreamEthereumBlocks(
 
 		case <-time.After(time.Millisecond * 1000):
 			latestblock, err := ethCl.BlockNumber(ctx)
+			// trail by 25 blocks
+			latestblock = latestblock - 25
 
 			if err != nil {
 				panic(err)
@@ -267,7 +269,7 @@ func processEthereumTransferCompletedEvent(
 
 	blockNumber := fmt.Sprint(vLog.BlockNumber)
 	ethTxId := vLog.TxHash.Hex()
-	koinosTxId := common.Bytes2Hex(event.TxId)
+	koinosTxId := "0x" + common.Bytes2Hex(event.TxId)
 	koinosOpId := event.OperationId.String()
 
 	log.Infof("new Eth LogTransferCompleted event | block: %s | tx: %s | koinos tx: %s | koinos op: %s", blockNumber, ethTxId, koinosTxId, koinosOpId)
@@ -280,11 +282,12 @@ func processEthereumTransferCompletedEvent(
 	}
 
 	if koinosTx == nil {
-		log.Errorf("koinos transaction %s - op %s does not exist", koinosTxId, koinosOpId)
-	} else {
-		koinosTx.Status = bridge_pb.TransactionStatus_completed
-		koinosTx.CompletionTransactionId = ethTxId
+		log.Warnf("koinos transaction %s - op %s does not exist", koinosTxId, koinosOpId)
+		koinosTx = &bridge_pb.Transaction{}
 	}
+
+	koinosTx.Status = bridge_pb.TransactionStatus_completed
+	koinosTx.CompletionTransactionId = ethTxId
 
 	err = koinosTxStore.Put(txKey, koinosTx)
 	if err != nil {
@@ -341,7 +344,7 @@ func processEthereumTokensLockedEvent(
 	expiration := blocktime + uint64(signaturesExpiration)
 
 	// sign the transaction
-	completeTransferHash := &bridge_pb.EthereumCompleteTransferHash{
+	completeTransferHash := &bridge_pb.CompleteTransferHash{
 		Action:        bridge_pb.ActionId_complete_transfer,
 		TransactionId: txId,
 		Token:         koinosToken,
@@ -375,7 +378,7 @@ func processEthereumTokensLockedEvent(
 		ethTx.Validators = []string{koinosAddress}
 		ethTx.Signatures = []string{sigB64}
 	} else {
-		if ethTx.Hash != hashB64 {
+		if ethTx.Hash != "" && ethTx.Hash != hashB64 {
 			errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one already received %s != calculated %s", txIdHex, ethTx.Hash, hashB64)
 			log.Errorf(errMsg)
 			panic(fmt.Errorf(errMsg))
@@ -395,7 +398,9 @@ func processEthereumTokensLockedEvent(
 	ethTx.BlockNumber = vLog.BlockNumber
 	ethTx.BlockTime = blocktime
 	ethTx.Expiration = expiration
-	ethTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+	if ethTx.Status != bridge_pb.TransactionStatus_completed {
+		ethTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+	}
 
 	err = ethTxStore.Put(txIdHex, ethTx)
 
@@ -430,7 +435,8 @@ func processEthereumTokensLockedEvent(
 		ethTx.Signatures = append(ethTx.Signatures, sig)
 	}
 
-	if len(ethTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+	if ethTx.Status != bridge_pb.TransactionStatus_completed &&
+		len(ethTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
 		ethTx.Status = bridge_pb.TransactionStatus_signed
 	}
 

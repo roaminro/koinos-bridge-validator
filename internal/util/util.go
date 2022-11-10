@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec"
@@ -103,10 +104,11 @@ func SignKoinosHash(key []byte, hash []byte) []byte {
 
 func SignEthereumHash(key *ecdsa.PrivateKey, hash []byte) []byte {
 	signatureBytes, err := crypto.Sign(hash, key)
+
 	if err != nil {
 		panic(err)
 	}
-	signatureBytes[64] += 27
+	signatureBytes[crypto.RecoveryIDOffset] += 27
 
 	return signatureBytes
 }
@@ -232,7 +234,11 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 	return signatures, nil
 }
 
-func GenerateEthereumCompleteTransferHash(txIdBytes []byte, operationId uint64, ethToken []byte, recipient []byte, amount uint64, ethContractAddress common.Address, expiration uint64) (common.Hash, common.Hash) {
+func GenerateEthereumCompleteTransferHash(txIdBytes []byte, operationId uint64, ethToken []byte, recipient []byte, amountStr string, ethContractAddress common.Address, expiration uint64) (common.Hash, common.Hash) {
+	amount, err := strconv.ParseUint(amountStr, 0, 64)
+	if err != nil {
+		panic(err)
+	}
 	hash := crypto.Keccak256Hash(
 		common.LeftPadBytes(big.NewInt(int64(bridge_pb.ActionId_complete_transfer.Number())).Bytes(), 32),
 		txIdBytes,

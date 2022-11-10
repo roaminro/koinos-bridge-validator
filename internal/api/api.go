@@ -28,9 +28,10 @@ type Api struct {
 	ethContractAddress    common.Address
 	validators            map[string]util.ValidatorConfig
 	koinosAddress         string
+	ethAddress            string
 }
 
-func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.TransactionsStore, koinosContractStr string, ethContractStr string, validators map[string]util.ValidatorConfig, koinosAddress string) *Api {
+func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.TransactionsStore, koinosContractStr string, ethContractStr string, validators map[string]util.ValidatorConfig, koinosAddress string, ethAddress string) *Api {
 	ethContractAddress := common.HexToAddress(ethContractStr)
 
 	koinosContractAddress, err := base58.Decode(koinosContractStr)
@@ -45,6 +46,7 @@ func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.Transactio
 		ethContractAddress:    ethContractAddress,
 		validators:            validators,
 		koinosAddress:         koinosAddress,
+		ethAddress:            ethAddress,
 	}
 }
 
@@ -97,6 +99,7 @@ func (api *Api) GetKoinosTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transactionIdParams := r.URL.Query()["TransactionId"]
+	opIdParams := r.URL.Query()["OpId"]
 
 	if len(transactionIdParams) <= 0 {
 		w.WriteHeader(http.StatusBadRequest)
@@ -104,7 +107,15 @@ func (api *Api) GetKoinosTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	transaction, _ := api.koinosTxStore.Get(transactionIdParams[0])
+	opId := "1"
+
+	if len(opIdParams) > 0 {
+		opId = opIdParams[0]
+	}
+
+	txKey := transactionIdParams[0] + "-" + opId
+
+	transaction, _ := api.koinosTxStore.Get(txKey)
 
 	if transaction == nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -207,7 +218,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		completeTransferHash := &bridge_pb.EthereumCompleteTransferHash{
+		completeTransferHash := &bridge_pb.CompleteTransferHash{
 			Action:        bridge_pb.ActionId_complete_transfer,
 			TransactionId: txIdBytes,
 			Token:         koinosToken,
@@ -286,9 +297,13 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 
 		if ethTx != nil {
 			if ethTx.Status == bridge_pb.TransactionStatus_completed {
-				log.Error(err.Error())
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("transaction already completed"))
+				for index, validatr := range ethTx.Validators {
+					if validatr == api.koinosAddress {
+						response = ethTx.Signatures[index]
+					}
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(response))
 				api.ethTxStore.Unlock()
 				return
 			}
@@ -355,12 +370,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		// check transaction hash
 		txIdBytes := common.FromHex(submittedSignature.Transaction.Id)
 
-		amount, err := strconv.ParseUint(submittedSignature.Transaction.Amount, 0, 64)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Invalid amount"))
-			return
-		}
+		amount := submittedSignature.Transaction.Amount
 
 		ethToken := common.FromHex(submittedSignature.Transaction.EthToken)
 		if err != nil {
@@ -381,7 +391,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 
-		hash, prefixedHash := util.GenerateEthereumCompleteTransferHash(txIdBytes, operationId, ethToken, recipient, amount, api.ethContractAddress, submittedSignature.Transaction.Expiration)
+		_, prefixedHash := util.GenerateEthereumCompleteTransferHash(txIdBytes, operationId, ethToken, recipient, amount, api.ethContractAddress, submittedSignature.Transaction.Expiration)
 
 		if prefixedHash.Hex() != submittedSignature.Transaction.Hash {
 			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Id, submittedSignature.Transaction.Hash, prefixedHash.Hex())
@@ -410,17 +420,21 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			signatureBytes := common.FromHex(signature)
+			signatureBytes := common.Hex2Bytes(signature[2:])
 
-			validatorCalculated, err := crypto.Ecrecover(hash.Bytes(), signatureBytes)
+			signatureBytes[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
+
+			recovered, err := crypto.SigToPub(prefixedHash.Bytes(), signatureBytes)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("cannot recover validator address"))
 				return
 			}
 
-			if validatorReceived != common.BytesToAddress(validatorCalculated).Hex() {
-				errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, validatorCalculated)
+			recoveredAddr := crypto.PubkeyToAddress(*recovered).Hex()
+
+			if validatorReceived != recoveredAddr {
+				errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, recoveredAddr)
 				log.Errorf(errMsg)
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(errMsg))
@@ -444,9 +458,13 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 
 		if koinosTx != nil {
 			if koinosTx.Status == bridge_pb.TransactionStatus_completed {
-				log.Error(err.Error())
-				w.WriteHeader(http.StatusBadRequest)
-				w.Write([]byte("transaction already completed"))
+				for index, validatr := range koinosTx.Validators {
+					if validatr == api.ethAddress {
+						response = koinosTx.Signatures[index]
+					}
+				}
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(response))
 				api.koinosTxStore.Unlock()
 				return
 			}
@@ -466,7 +484,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 			for index, validatr := range koinosTx.Validators {
 				signatures[validatr] = koinosTx.Signatures[index]
 
-				if validatr == api.koinosAddress {
+				if validatr == api.ethAddress {
 					response = koinosTx.Signatures[index]
 				}
 			}

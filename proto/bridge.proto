@@ -68,11 +68,11 @@ message submitted_signature {
 message tokens_locked_event {
     bytes from = 1;
     bytes token = 2;
-    uint64 amount = 3;
+    string amount = 3;
     string recipient = 4;
-  }
+}
   
-  message transfer_completed_event {
+message transfer_completed_event {
     bytes tx_id = 1;
-  }
+}
   

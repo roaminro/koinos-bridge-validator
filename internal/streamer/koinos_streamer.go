@@ -119,6 +119,7 @@ func StreamKoinosBlocks(
 						log.Infof("fetched koinos blocks: %d - %d", fromBlock, toBlock)
 
 						for _, block := range blocks.BlockItems {
+							log.Infof("block#: %d", block.BlockHeight)
 							for _, receipt := range block.Receipt.TransactionReceipts {
 								// make the sure the transaction did not revert
 								if !receipt.Reverted {
@@ -156,10 +157,7 @@ func StreamKoinosBlocks(
 							lastKoinosBlockParsed = block.BlockHeight
 						}
 
-						if len(blocks.BlockItems) == 0 {
-							// if no logs available
-							fromBlock = toBlock + 1
-						} else {
+						if len(blocks.BlockItems) > 0 {
 							fromBlock = lastKoinosBlockParsed + 1
 						}
 					}
@@ -199,11 +197,13 @@ func processKoinosTransferCompletedEvent(
 	}
 
 	if ethTx == nil {
-		log.Errorf("ethereum transaction %s does not exist", ethTx)
-	} else {
-		ethTx.Status = bridge_pb.TransactionStatus_completed
-		ethTx.CompletionTransactionId = koinosTxId + "-" + koinosOpId
+		log.Warnf("ethereum transaction %s does not exist", ethTx)
+		ethTx = &bridge_pb.Transaction{}
+
 	}
+
+	ethTx.Status = bridge_pb.TransactionStatus_completed
+	ethTx.CompletionTransactionId = koinosTxId + "-" + koinosOpId
 
 	err = ethTxStore.Put(ethTxId, ethTx)
 	if err != nil {
@@ -235,7 +235,7 @@ func processKoinosTokensLockedEvent(
 
 	blockNumber := block.BlockHeight
 	txId := receipt.Id
-	txIdHex := common.Bytes2Hex(receipt.Id)
+	txIdHex := "0x" + common.Bytes2Hex(receipt.Id)
 	operationId := event.Sequence
 	operationIdStr := fmt.Sprint(operationId)
 	from := base58.Encode(tokensLockedEvent.From)
@@ -255,7 +255,7 @@ func processKoinosTokensLockedEvent(
 	_, prefixedHash := util.GenerateEthereumCompleteTransferHash(txId, uint64(operationId), ethereumToken.Bytes(), recipient.Bytes(), amount, ethereumContractAddr, expiration)
 
 	sigBytes := util.SignEthereumHash(ethPK, prefixedHash.Bytes())
-	sigHex := common.Bytes2Hex(sigBytes)
+	sigHex := "0x" + common.Bytes2Hex(sigBytes)
 
 	// store the transaction
 	koinosTxStore.Lock()
@@ -271,7 +271,7 @@ func processKoinosTokensLockedEvent(
 		koinosTx.Validators = []string{ethereumAddress}
 		koinosTx.Signatures = []string{sigHex}
 	} else {
-		if koinosTx.Hash != prefixedHash.Hex() {
+		if koinosTx.Hash != "" && koinosTx.Hash != prefixedHash.Hex() {
 			errMsg := fmt.Sprintf("the calculated hash for tx %s is different than the one already received %s != calculated %s", txIdHex, koinosTx.Hash, prefixedHash.Hex())
 			log.Errorf(errMsg)
 			panic(fmt.Errorf(errMsg))
@@ -282,7 +282,7 @@ func processKoinosTokensLockedEvent(
 
 	koinosTx.Type = bridge_pb.TransactionType_koinos
 	koinosTx.Id = txIdHex
-	koinosTx.OpId = fmt.Sprint(operationId)
+	koinosTx.OpId = operationIdStr
 	koinosTx.From = from
 	koinosTx.EthToken = tokenAddresses[koinosToken].EthereumAddress
 	koinosTx.KoinosToken = koinosToken
@@ -292,7 +292,10 @@ func processKoinosTokensLockedEvent(
 	koinosTx.BlockNumber = blockNumber
 	koinosTx.BlockTime = blocktime
 	koinosTx.Expiration = expiration
-	koinosTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+
+	if koinosTx.Status != bridge_pb.TransactionStatus_completed {
+		koinosTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+	}
 
 	err = koinosTxStore.Put(txKey, koinosTx)
 
@@ -303,7 +306,14 @@ func processKoinosTokensLockedEvent(
 	koinosTxStore.Unlock()
 
 	// broadcast transaction
-	signatures, _ := util.BroadcastTransaction(koinosTx, koinosPK, koinosAddress, validators)
+	koinoSignatures, _ := util.BroadcastTransaction(koinosTx, koinosPK, koinosAddress, validators)
+
+	// the signatures received from the broadcast are mapped using the Koinos validators addresses
+	// remap to Ethereum addresses
+	ethSignatures := make(map[string]string)
+	for val, sig := range koinoSignatures {
+		ethSignatures[validators[val].EthereumAddress] = sig
+	}
 
 	// update the transaction with signatures we may have gotten back from the broadcast
 	koinosTxStore.Lock()
@@ -313,21 +323,23 @@ func processKoinosTokensLockedEvent(
 		panic(err)
 	}
 
+	// add signatures we may already have
 	for index, validatr := range koinosTx.Validators {
-		_, found := signatures[validatr]
+		_, found := ethSignatures[validatr]
 		if !found {
-			signatures[validatr] = koinosTx.Signatures[index]
+			ethSignatures[validatr] = koinosTx.Signatures[index]
 		}
 	}
 
 	koinosTx.Validators = []string{}
 	koinosTx.Signatures = []string{}
-	for val, sig := range signatures {
+	for val, sig := range ethSignatures {
 		koinosTx.Validators = append(koinosTx.Validators, val)
 		koinosTx.Signatures = append(koinosTx.Signatures, sig)
 	}
 
-	if len(koinosTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+	if koinosTx.Status != bridge_pb.TransactionStatus_completed &&
+		len(koinosTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
 		koinosTx.Status = bridge_pb.TransactionStatus_signed
 	}
 

@@ -3,7 +3,7 @@ module github.com/koinos-bridge/koinos-bridge-validator
 go 1.16
 
 require (
-	github.com/ethereum/go-ethereum v1.10.17
+	github.com/ethereum/go-ethereum v1.10.26
 	github.com/koinos/koinos-log-golang v0.0.0-20210621202301-3310a8e5866b
 	github.com/koinos/koinos-util-golang v1.0.0
 	github.com/spf13/pflag v1.0.3

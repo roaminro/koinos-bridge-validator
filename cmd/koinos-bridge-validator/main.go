@@ -122,12 +122,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	log.Infof("Node koinosAddress %s", koinosAddress)
 
 	ethPrivateKey, err := crypto.HexToECDSA(ethPK)
 	if err != nil {
 		panic(err)
 	}
 	ethAddress := crypto.PubkeyToAddress(ethPrivateKey.PublicKey).Hex()
+	log.Infof("Node ethAddress %s", ethAddress)
 
 	// metadata store
 	metadataDbDir := path.Join(koinosUtil.GetAppDir((*baseDir), appName), "metadata")
@@ -251,7 +253,7 @@ func main() {
 
 	// Run API server
 	go func() {
-		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators, koinosAddress)
+		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators, koinosAddress, ethAddress)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/GetEthereumTransaction", api.GetEthereumTransaction)
 		mux.HandleFunc("/GetKoinosTransaction", api.GetKoinosTransaction)
