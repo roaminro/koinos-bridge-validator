@@ -334,7 +334,7 @@ func processEthereumTokensLockedEvent(
 	ethFrom := event.From.Hex()
 	ethToken := event.Token.Hex()
 	amount := event.Amount.Uint64()
-	blocktime := event.Blocktime.Uint64() * 1000
+	blocktime := event.Blocktime.Uint64()
 
 	koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
 	if err != nil {
@@ -348,7 +348,7 @@ func processEthereumTokensLockedEvent(
 
 	log.Infof("new Eth TokensLockedEvent | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken].KoinosAddress, ethFrom, event.Recipient, event.Amount.String())
 
-	expiration := blocktime + uint64(signaturesExpiration*1000)
+	expiration := blocktime + uint64(signaturesExpiration)
 
 	// sign the transaction
 	completeTransferHash := &bridge_pb.CompleteTransferHash{

@@ -47,7 +47,7 @@ const (
 
 	emptyDefault = ""
 
-	signaturesExpirationDefault uint = 60 * 30 // 30mins
+	signaturesExpirationDefault uint = 60 * 60 * 1000 // 60mins
 	apiUrlDefault                    = ":3000"
 )
 

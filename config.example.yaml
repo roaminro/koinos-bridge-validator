@@ -1,0 +1,26 @@
+bridge:
+  reset: false
+  ethereum-rpc: http://127.0.0.1:8545
+  ethereum-pk: "27fe8..."
+  ethereum-contract: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+  ethereum-max-blocks-stream: 500
+  koinos-rpc: http://localhost:8080/
+  koinos-pk: 5K...
+  koinos-contract: 1JaMS92SPa3rQoZqUifP7GJxp2MEULxrJB
+  validators:
+    val1:
+      ethereum-address: "0xc73280617F4daa107F8b2e0F4E75FA5b5239Cf24"
+      koinos-address: 1HYd2zqyWkDuKH26UYYNLwYGE6vhojCSqE
+      api-url: http://localhost:3000
+    val2:
+      ethereum-address: "0x2b0e9EB31C3F3BC06437A7dF090a2f6a4D658150"
+      koinos-address: 16S4aMFZVvkW2xqnL2WxTsvDpPKTT5ak4Z
+      api-url: http://localhost:3001
+    val3:
+      ethereum-address: "0x265d11e5bD1646C61F6dA0AdF3b404372268BDd3"
+      koinos-address: 17tXerRg9AtcyJnJso6EfNZD7L42QQvcGY
+      api-url: http://localhost:3002
+  tokens:
+    koin:
+      ethereum-address: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+      koinos-address: 1NZcHP37xvQNDZEkGH2RUceFqa33K3FXEG

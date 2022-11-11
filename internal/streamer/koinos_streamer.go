@@ -249,7 +249,7 @@ func processKoinosTokensLockedEvent(
 
 	log.Infof("new Koinos tokens_locked_event | block: %s | tx: %s | op_id: %s | Koinos token: %s | Ethereum token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, operationIdStr, koinosToken, tokenAddresses[koinosToken].EthereumAddress, from, tokensLockedEvent.Recipient, amountStr)
 
-	expiration := blocktime/1000 + uint64(signaturesExpiration)
+	expiration := blocktime + uint64(signaturesExpiration)
 
 	// sign the transaction
 	_, prefixedHash := util.GenerateEthereumCompleteTransferHash(txId, uint64(operationId), ethereumToken.Bytes(), recipient.Bytes(), amount, ethereumContractAddr, expiration)
