@@ -76,3 +76,7 @@ message transfer_completed_event {
     bytes tx_id = 1;
 }
   
+message request_new_signatures_event {
+    string transaction_id = 1;
+    string operation_id = 2;
+}

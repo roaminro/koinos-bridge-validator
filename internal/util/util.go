@@ -138,12 +138,27 @@ func GetBoolOption(a bool, b bool) bool {
 	}
 }
 
-func PublicKeyToAddress(pubkey *btcec.PublicKey) ([]byte, error) {
+func KoinosPublicKeyToAddress(pubkey *btcec.PublicKey) ([]byte, error) {
 	mainNetAddr, _ := btcutil.NewAddressPubKey(pubkey.SerializeCompressed(), &chaincfg.MainNetParams)
 	return base58.Decode(mainNetAddr.EncodeAddress())
 }
 
-func RecoverAddressFromSignature(signature string, hash []byte) (string, error) {
+func RecoverEthereumAddressFromSignature(signature string, prefixedHash []byte) (string, error) {
+	signatureBytes := common.Hex2Bytes(signature[2:])
+
+	signatureBytes[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
+
+	recovered, err := crypto.SigToPub(prefixedHash, signatureBytes)
+	if err != nil {
+		return "", err
+	}
+
+	recoveredAddr := crypto.PubkeyToAddress(*recovered).Hex()
+
+	return recoveredAddr, nil
+}
+
+func RecoverKoinosAddressFromSignature(signature string, hash []byte) (string, error) {
 	signatureBytes, err := base64.URLEncoding.DecodeString(signature)
 	if err != nil {
 		log.Error(err.Error())
@@ -155,7 +170,7 @@ func RecoverAddressFromSignature(signature string, hash []byte) (string, error) 
 		log.Error(err.Error())
 		return "", err
 	}
-	validatorAddressBytes, err := PublicKeyToAddress(validatorPubKey)
+	validatorAddressBytes, err := KoinosPublicKeyToAddress(validatorPubKey)
 	if err != nil {
 		log.Error(err.Error())
 		return "", err
@@ -221,12 +236,15 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 		}
 
 		log.Infof("broadcast %s: status code %d for tx %s\n", validator.KoinosAddress, res.StatusCode, tx.Id)
-		signatureBytes, _ := ioutil.ReadAll(res.Body)
-		signature := string(signatureBytes)
 
-		if signature != "" {
-			log.Infof("client: received signature %s\n", signatureBytes)
-			signatures[validator.KoinosAddress] = signature
+		if res.StatusCode == http.StatusOK {
+			signatureBytes, _ := ioutil.ReadAll(res.Body)
+			signature := string(signatureBytes)
+
+			if signature != "" {
+				log.Infof("client: received signature %s\n", signatureBytes)
+				signatures[validator.KoinosAddress] = signature
+			}
 		}
 
 		processedApiUrls[validator.ApiUrl] = true

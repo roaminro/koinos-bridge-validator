@@ -148,6 +148,20 @@ func StreamKoinosBlocks(
 													receipt,
 													event,
 												)
+											} else if event.Name == "bridge.request_new_signatures_event" {
+												processRequestNewSignaturesEvent(
+													koinosTxStore,
+													block,
+													receipt,
+													event,
+													signaturesExpiration,
+													ethereumPK,
+													ethereumAddress,
+													koinosPK,
+													koinosAddress,
+													ethContractAddr,
+													validators,
+												)
 											}
 										}
 									}
@@ -167,6 +181,159 @@ func StreamKoinosBlocks(
 			}
 		}
 	}
+}
+
+func processRequestNewSignaturesEvent(
+	koinosTxStore *store.TransactionsStore,
+	block *block_store.BlockItem,
+	receipt *protocol.TransactionReceipt,
+	event *protocol.EventData,
+	signaturesExpiration uint,
+	ethPK *ecdsa.PrivateKey,
+	ethereumAddress string,
+	koinosPK []byte,
+	koinosAddress string,
+	ethereumContractAddr common.Address,
+	validators map[string]util.ValidatorConfig,
+) {
+	// parse event
+	requestNewSignaturesEvent := &bridge_pb.RequestNewSignaturesEvent{}
+
+	err := proto.Unmarshal(event.Data, requestNewSignaturesEvent)
+	if err != nil {
+		panic(err)
+	}
+
+	transactionId := requestNewSignaturesEvent.TransactionId
+	operationId := requestNewSignaturesEvent.OperationId
+
+	blocktime := block.Block.Header.Timestamp
+	newExpiration := blocktime + uint64(signaturesExpiration)
+
+	log.Infof("new Koinos request_new_signatures_event | block: %s | tx: %s | op_id: %s | ", block.Block.Header.Height, transactionId, operationId)
+
+	if operationId == "" {
+		operationId = "1"
+	}
+
+	txKey := transactionId + "-" + operationId
+	koinosTxStore.Lock()
+	koinosTx, err := koinosTxStore.Get(txKey)
+	if err != nil {
+		panic(err)
+	}
+
+	if koinosTx != nil && koinosTx.Status != bridge_pb.TransactionStatus_completed {
+		// can only request signatures after 2x expiration time
+		allowedRequestNewSignaturesBlockTime := koinosTx.Expiration + uint64(signaturesExpiration)
+
+		if blocktime >= allowedRequestNewSignaturesBlockTime {
+			ethereumToken := common.HexToAddress(koinosTx.EthToken)
+			recipient := common.HexToAddress(koinosTx.Recipient)
+			txId := common.Hex2Bytes(koinosTx.Id)
+			opId, err := strconv.ParseUint(koinosTx.OpId, 0, 64)
+			if err != nil {
+				panic(err)
+			}
+
+			// sign the transaction
+			_, prefixedHash := util.GenerateEthereumCompleteTransferHash(txId, opId, ethereumToken.Bytes(), recipient.Bytes(), koinosTx.Amount, ethereumContractAddr, newExpiration)
+
+			sigBytes := util.SignEthereumHash(ethPK, prefixedHash.Bytes())
+			sigHex := "0x" + common.Bytes2Hex(sigBytes)
+
+			// cleanup signatures
+			newSignatures := make(map[string]string)
+			newSignatures[ethereumAddress] = sigHex
+
+			for index, validatr := range koinosTx.Validators {
+				_, found := newSignatures[validatr]
+				if !found {
+					// only keep signatures that match the new hash
+					sig := koinosTx.Signatures[index]
+					recoveredAddr, _ := util.RecoverEthereumAddressFromSignature(sig, prefixedHash.Bytes())
+
+					if recoveredAddr == validatr {
+						newSignatures[validatr] = sig
+					}
+				}
+			}
+
+			// update tx
+			koinosTx.Expiration = newExpiration
+			koinosTx.Hash = prefixedHash.Hex()
+			koinosTx.Validators = []string{}
+			koinosTx.Signatures = []string{}
+			for val, sig := range newSignatures {
+				koinosTx.Validators = append(koinosTx.Validators, val)
+				koinosTx.Signatures = append(koinosTx.Signatures, sig)
+			}
+
+			koinosTx.Status = bridge_pb.TransactionStatus_gathering_signatures
+
+			if len(koinosTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+				koinosTx.Status = bridge_pb.TransactionStatus_signed
+			}
+
+			err = koinosTxStore.Put(txKey, koinosTx)
+
+			if err != nil {
+				panic(err)
+			}
+
+			koinosTxStore.Unlock()
+
+			// broadcast transaction
+			koinosSignatures, _ := util.BroadcastTransaction(koinosTx, koinosPK, koinosAddress, validators)
+
+			// the signatures received from the broadcast are mapped using the Koinos validators addresses
+			// remap to Ethereum addresses
+			ethSignatures := make(map[string]string)
+			for val, sig := range koinosSignatures {
+				ethSignatures[validators[val].EthereumAddress] = sig
+			}
+
+			// update the transaction with signatures we may have gotten back from the broadcast
+			koinosTxStore.Lock()
+
+			koinosTx, err = koinosTxStore.Get(txKey)
+			if err != nil {
+				panic(err)
+			}
+
+			for index, validatr := range koinosTx.Validators {
+				_, found := ethSignatures[validatr]
+				if !found {
+					ethSignatures[validatr] = koinosTx.Signatures[index]
+				}
+			}
+
+			koinosTx.Validators = []string{}
+			koinosTx.Signatures = []string{}
+			for val, sig := range ethSignatures {
+				koinosTx.Validators = append(koinosTx.Validators, val)
+				koinosTx.Signatures = append(koinosTx.Signatures, sig)
+			}
+
+			if koinosTx.Status != bridge_pb.TransactionStatus_completed &&
+				len(koinosTx.Signatures) >= ((((len(validators)/2)*10)/3)*2)/10+1 {
+				koinosTx.Status = bridge_pb.TransactionStatus_signed
+			}
+
+			err = koinosTxStore.Put(txKey, koinosTx)
+
+			if err != nil {
+				panic(err)
+			}
+
+			koinosTxStore.Unlock()
+		}
+	} else {
+		log.Infof("Koinos tx %s does not exist or is already completed", txKey)
+	}
+
+	koinosTxStore.Unlock()
+
 }
 
 func processKoinosTransferCompletedEvent(
@@ -306,12 +473,12 @@ func processKoinosTokensLockedEvent(
 	koinosTxStore.Unlock()
 
 	// broadcast transaction
-	koinoSignatures, _ := util.BroadcastTransaction(koinosTx, koinosPK, koinosAddress, validators)
+	koinosSignatures, _ := util.BroadcastTransaction(koinosTx, koinosPK, koinosAddress, validators)
 
 	// the signatures received from the broadcast are mapped using the Koinos validators addresses
 	// remap to Ethereum addresses
 	ethSignatures := make(map[string]string)
-	for val, sig := range koinoSignatures {
+	for val, sig := range koinosSignatures {
 		ethSignatures[validators[val].EthereumAddress] = sig
 	}
 

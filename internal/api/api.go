@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	log "github.com/koinos/koinos-log-golang"
 	"github.com/mr-tron/base58"
 
@@ -175,7 +174,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 
 	hash := sha256.Sum256(transactionBytes)
 
-	signer, err := util.RecoverAddressFromSignature(submittedSignature.Signature, hash[:])
+	signer, err := util.RecoverKoinosAddressFromSignature(submittedSignature.Signature, hash[:])
 	if err != nil {
 		log.Error(err.Error())
 		w.WriteHeader(http.StatusBadRequest)
@@ -265,7 +264,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			validatorCalculated, err := util.RecoverAddressFromSignature(signature, hash[:])
+			validatorCalculated, err := util.RecoverKoinosAddressFromSignature(signature, hash[:])
 			if err != nil {
 				log.Error(err.Error())
 				w.WriteHeader(http.StatusBadRequest)
@@ -420,18 +419,13 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			signatureBytes := common.Hex2Bytes(signature[2:])
+			recoveredAddr, err := util.RecoverEthereumAddressFromSignature(signature, prefixedHash.Bytes())
 
-			signatureBytes[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
-
-			recovered, err := crypto.SigToPub(prefixedHash.Bytes(), signatureBytes)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte("cannot recover validator address"))
 				return
 			}
-
-			recoveredAddr := crypto.PubkeyToAddress(*recovered).Hex()
 
 			if validatorReceived != recoveredAddr {
 				errMsg := fmt.Sprintf("the signature provided for validator %s does not match the address recovered %s", validatorReceived, recoveredAddr)
