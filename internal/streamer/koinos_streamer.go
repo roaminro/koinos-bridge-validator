@@ -143,7 +143,7 @@ func StreamKoinosBlocks(
 												)
 											} else if event.Name == "bridge.transfer_completed_event" {
 												processKoinosTransferCompletedEvent(
-													koinosTxStore,
+													ethTxStore,
 													block,
 													receipt,
 													event,
@@ -184,8 +184,8 @@ func processKoinosTransferCompletedEvent(
 	}
 
 	blockNumber := block.BlockHeight
-	ethTxId := common.Bytes2Hex(transferCompletedEvent.TxId)
-	koinosTxId := common.Bytes2Hex(receipt.Id)
+	ethTxId := "0x" + common.Bytes2Hex(transferCompletedEvent.TxId)
+	koinosTxId := "0x" + common.Bytes2Hex(receipt.Id)
 	koinosOpId := fmt.Sprint(event.Sequence)
 
 	log.Infof("new Koinos transfer_completed_event | block: %s | eth tx: %s | koinos tx: %s | koinos op: %s", blockNumber, ethTxId, koinosTxId, koinosOpId)
@@ -197,9 +197,9 @@ func processKoinosTransferCompletedEvent(
 	}
 
 	if ethTx == nil {
-		log.Warnf("ethereum transaction %s does not exist", ethTx)
+		log.Warnf("ethereum transaction %s does not exist", ethTxId)
 		ethTx = &bridge_pb.Transaction{}
-
+		ethTx.Type = bridge_pb.TransactionType_ethereum
 	}
 
 	ethTx.Status = bridge_pb.TransactionStatus_completed
@@ -249,7 +249,7 @@ func processKoinosTokensLockedEvent(
 
 	log.Infof("new Koinos tokens_locked_event | block: %s | tx: %s | op_id: %s | Koinos token: %s | Ethereum token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, operationIdStr, koinosToken, tokenAddresses[koinosToken].EthereumAddress, from, tokensLockedEvent.Recipient, amountStr)
 
-	expiration := blocktime + uint64(signaturesExpiration)
+	expiration := blocktime/1000 + uint64(signaturesExpiration)
 
 	// sign the transaction
 	_, prefixedHash := util.GenerateEthereumCompleteTransferHash(txId, uint64(operationId), ethereumToken.Bytes(), recipient.Bytes(), amount, ethereumContractAddr, expiration)

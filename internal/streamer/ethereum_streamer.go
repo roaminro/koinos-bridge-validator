@@ -290,6 +290,7 @@ func processEthereumTransferCompletedEvent(
 	if koinosTx == nil {
 		log.Warnf("koinos transaction %s - op %s does not exist", koinosTxId, koinosOpId)
 		koinosTx = &bridge_pb.Transaction{}
+		koinosTx.Type = bridge_pb.TransactionType_koinos
 	}
 
 	koinosTx.Status = bridge_pb.TransactionStatus_completed
@@ -333,7 +334,7 @@ func processEthereumTokensLockedEvent(
 	ethFrom := event.From.Hex()
 	ethToken := event.Token.Hex()
 	amount := event.Amount.Uint64()
-	blocktime := event.Blocktime.Uint64()
+	blocktime := event.Blocktime.Uint64() * 1000
 
 	koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
 	if err != nil {
@@ -347,7 +348,7 @@ func processEthereumTokensLockedEvent(
 
 	log.Infof("new Eth TokensLockedEvent | block: %s | tx: %s | ETH token: %s | Koinos token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, ethToken, tokenAddresses[ethToken].KoinosAddress, ethFrom, event.Recipient, event.Amount.String())
 
-	expiration := blocktime + uint64(signaturesExpiration)
+	expiration := blocktime + uint64(signaturesExpiration*1000)
 
 	// sign the transaction
 	completeTransferHash := &bridge_pb.CompleteTransferHash{
@@ -366,10 +367,10 @@ func processEthereumTokensLockedEvent(
 	}
 
 	hash := sha256.Sum256(completeTransferHashBytes)
-	hashB64 := base64.StdEncoding.EncodeToString(hash[:])
+	hashB64 := base64.URLEncoding.EncodeToString(hash[:])
 
 	sigBytes := util.SignKoinosHash(koinosPK, hash[:])
-	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
+	sigB64 := base64.URLEncoding.EncodeToString(sigBytes)
 
 	// store the transaction
 	ethTxStore.Lock()

@@ -144,7 +144,7 @@ func PublicKeyToAddress(pubkey *btcec.PublicKey) ([]byte, error) {
 }
 
 func RecoverAddressFromSignature(signature string, hash []byte) (string, error) {
-	signatureBytes, err := base64.StdEncoding.DecodeString(signature)
+	signatureBytes, err := base64.URLEncoding.DecodeString(signature)
 	if err != nil {
 		log.Error(err.Error())
 		return "", err
@@ -174,7 +174,7 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 
 	hash := sha256.Sum256(txBytes)
 	sigBytes := SignKoinosHash(koinosPK, hash[:])
-	sigB64 := base64.StdEncoding.EncodeToString(sigBytes)
+	sigB64 := base64.URLEncoding.EncodeToString(sigBytes)
 
 	submittedSignature := &bridge_pb.SubmittedSignature{
 		Transaction: tx,

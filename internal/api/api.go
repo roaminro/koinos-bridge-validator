@@ -236,7 +236,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		}
 
 		hash := sha256.Sum256(completeTransferHashBytes)
-		hashB64 := base64.StdEncoding.EncodeToString(hash[:])
+		hashB64 := base64.URLEncoding.EncodeToString(hash[:])
 
 		if hashB64 != submittedSignature.Transaction.Hash {
 			errMsg := fmt.Sprintf("the calulated hash for tx %s is different than the one received %s != calculated %s", submittedSignature.Transaction.Id, submittedSignature.Transaction.Hash, hashB64)
