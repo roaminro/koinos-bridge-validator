@@ -51,14 +51,10 @@ func (handler *MetadataStore) Get() (*bridge_pb.Metadata, error) {
 		return nil, fmt.Errorf("%w, %v", ErrBackend, err)
 	}
 
-	if len(itemBytes) != 0 {
-		item := &bridge_pb.Metadata{}
-		if err := proto.Unmarshal(itemBytes, item); err != nil {
-			return nil, fmt.Errorf("%w, %v", ErrDeserialization, err)
-		}
-
-		return item, nil
+	item := &bridge_pb.Metadata{}
+	if err := proto.Unmarshal(itemBytes, item); err != nil {
+		return nil, fmt.Errorf("%w, %v", ErrDeserialization, err)
 	}
 
-	return nil, nil
+	return item, nil
 }

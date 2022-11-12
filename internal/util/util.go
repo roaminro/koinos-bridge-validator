@@ -47,16 +47,18 @@ type BridgeConfig struct {
 
 	EthereumRpc             string `yaml:"ethereum-rpc"`
 	EthereumContract        string `yaml:"ethereum-contract"`
-	EthereumBlockStart      string `yaml:"ethereum-block-start"`
+	EthereumBlockStart      uint64 `yaml:"ethereum-block-start"`
 	EthereumPK              string `yaml:"ethereum-pk"`
-	EthereumMaxBlocksStream string `yaml:"ethereum-max-blocks-stream"`
-	EthereumConfirmations   string `yaml:"ethereum-confirmations"`
+	EthereumMaxBlocksStream uint64 `yaml:"ethereum-max-blocks-stream"`
+	EthereumConfirmations   uint64 `yaml:"ethereum-confirmations"`
+	EthereumPollingTime     uint   `yaml:"ethereum-polling-time"`
 
 	KoinosRpc             string `yaml:"koinos-rpc"`
 	KoinosContract        string `yaml:"koinos-contract"`
-	KoinosBlockStart      string `yaml:"koinos-block-start"`
+	KoinosBlockStart      uint64 `yaml:"koinos-block-start"`
 	KoinosPK              string `yaml:"koinos-pk"`
-	KoinosMaxBlocksStream string `yaml:"koinos-max-blocks-stream"`
+	KoinosMaxBlocksStream uint64 `yaml:"koinos-max-blocks-stream"`
+	KoinosPollingTime     uint   `yaml:"koinos-polling-time"`
 
 	Validators map[string]ValidatorConfig `yaml:"validators"`
 	Tokens     map[string]TokenConfig     `yaml:"tokens"`
@@ -127,6 +129,14 @@ func GetStringOption(a string, b string) string {
 }
 
 func GetUIntOption(a uint, b uint) uint {
+	if a != 0 {
+		return a
+	} else {
+		return b
+	}
+}
+
+func GetUInt64Option(a uint64, b uint64) uint64 {
 	if a != 0 {
 		return a
 	} else {

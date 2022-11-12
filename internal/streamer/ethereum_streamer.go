@@ -30,10 +30,10 @@ import (
 func StreamEthereumBlocks(
 	ctx context.Context,
 	metadataStore *store.MetadataStore,
-	savedLastEthereumBlockParsed string,
+	startBlock uint64,
 	ethRPC string,
 	ethContractStr string,
-	ethMaxBlocksToStreamStr string,
+	ethMaxBlocksToStream uint64,
 	koinosPK []byte,
 	koinosAddress string,
 	koinosContractStr string,
@@ -42,7 +42,8 @@ func StreamEthereumBlocks(
 	koinosTxStore *store.TransactionsStore,
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
-	ethConfirmationsStr string,
+	ethConfirmations uint64,
+	ethPollingTime uint,
 ) {
 	tokensLockedEventTopic := crypto.Keccak256Hash([]byte("TokensLockedEvent(address,address,uint256,string,uint256)"))
 	tokensLockedEventAbiStr := `[{
@@ -157,24 +158,6 @@ func StreamEthereumBlocks(
 
 	fmt.Println("connected to Ethereum RPC")
 
-	ethMaxBlocksToStream, err := strconv.ParseUint(ethMaxBlocksToStreamStr, 0, 64)
-	if err != nil {
-		log.Error(err.Error())
-		panic(err)
-	}
-
-	startBlock, err := strconv.ParseUint(savedLastEthereumBlockParsed, 0, 64)
-	if err != nil {
-		log.Error(err.Error())
-		panic(err)
-	}
-
-	ethConfirmations, err := strconv.ParseUint(ethConfirmationsStr, 0, 64)
-	if err != nil {
-		log.Error(err.Error())
-		panic(err)
-	}
-
 	startBlock++
 
 	ethContractAddr := common.HexToAddress(ethContractStr)
@@ -200,20 +183,21 @@ func StreamEthereumBlocks(
 				panic(err)
 			}
 
-			metadata.LastEthereumBlockParsed = strconv.FormatUint(lastEthereumBlockParsed, 10)
+			metadata.LastEthereumBlockParsed = lastEthereumBlockParsed
 
 			metadataStore.Put(metadata)
 			return
 
-		case <-time.After(time.Millisecond * 1000):
+		case <-time.After(time.Millisecond * time.Duration(ethPollingTime)):
 			latestblock, err := ethCl.BlockNumber(ctx)
-			// trail by ethConfirmations blocks
-			latestblock = latestblock - ethConfirmations
 
 			if err != nil {
 				log.Error(err.Error())
 				panic(err)
 			}
+
+			// trail by ethConfirmations blocks
+			latestblock = latestblock - ethConfirmations
 
 			log.Infof("latestblock: %d", latestblock)
 

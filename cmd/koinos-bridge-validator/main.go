@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
@@ -17,7 +16,6 @@ import (
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/store"
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/streamer"
 	"github.com/koinos-bridge/koinos-bridge-validator/internal/util"
-	"github.com/koinos-bridge/koinos-bridge-validator/proto/build/github.com/koinos-bridge/koinos-bridge-validator/bridge_pb"
 	"github.com/mr-tron/base58"
 
 	log "github.com/koinos/koinos-log-golang"
@@ -37,13 +35,15 @@ const (
 	resetDefault      = false
 
 	ethRPCDefault               = "http://127.0.0.1:8545/"
-	ethBlockStartDefault        = "0"
-	ethMaxBlocksToStreamDefault = "500"
-	ethConfirmationsDefault     = "25"
+	ethBlockStartDefault        = 0
+	ethMaxBlocksToStreamDefault = 500
+	ethConfirmationsDefault     = 25
+	ethPollingTimeDefault       = 3000
 
 	koinosRPCDefault               = "http://127.0.0.1:8080/"
-	koinosBlockStartDefault        = "0"
-	koinosMaxBlocksToStreamDefault = "500"
+	koinosBlockStartDefault        = 0
+	koinosMaxBlocksToStreamDefault = 500
+	koinosPollingTimeDefault       = 3000
 
 	emptyDefault = ""
 
@@ -79,16 +79,18 @@ func main() {
 
 	ethRPC := util.GetStringOption(yamlConfig.Bridge.EthereumRpc, ethRPCDefault)
 	ethContract := util.GetStringOption(yamlConfig.Bridge.EthereumContract, emptyDefault)
-	ethBlockStart := util.GetStringOption(yamlConfig.Bridge.EthereumBlockStart, ethBlockStartDefault)
-	ethMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.EthereumMaxBlocksStream, ethMaxBlocksToStreamDefault)
-	ethConfirmations := util.GetStringOption(yamlConfig.Bridge.EthereumConfirmations, ethConfirmationsDefault)
+	ethBlockStart := util.GetUInt64Option(yamlConfig.Bridge.EthereumBlockStart, ethBlockStartDefault)
+	ethMaxBlocksToStream := util.GetUInt64Option(yamlConfig.Bridge.EthereumMaxBlocksStream, ethMaxBlocksToStreamDefault)
+	ethConfirmations := util.GetUInt64Option(yamlConfig.Bridge.EthereumConfirmations, ethConfirmationsDefault)
 	ethPK := util.GetStringOption(yamlConfig.Bridge.EthereumPK, emptyDefault)
+	ethPollingTime := util.GetUIntOption(yamlConfig.Bridge.EthereumPollingTime, ethPollingTimeDefault)
 
 	koinosRPC := util.GetStringOption(yamlConfig.Bridge.KoinosRpc, koinosRPCDefault)
 	koinosContract := util.GetStringOption(yamlConfig.Bridge.KoinosContract, emptyDefault)
-	koinosBlockStart := util.GetStringOption(yamlConfig.Bridge.KoinosBlockStart, koinosBlockStartDefault)
-	koinosMaxBlocksToStream := util.GetStringOption(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
+	koinosBlockStart := util.GetUInt64Option(yamlConfig.Bridge.KoinosBlockStart, koinosBlockStartDefault)
+	koinosMaxBlocksToStream := util.GetUInt64Option(yamlConfig.Bridge.KoinosMaxBlocksStream, koinosMaxBlocksToStreamDefault)
 	koinosPK := util.GetStringOption(yamlConfig.Bridge.KoinosPK, emptyDefault)
+	koinosPollingTime := util.GetUIntOption(yamlConfig.Bridge.KoinosPollingTime, koinosPollingTimeDefault)
 
 	validators := make(map[string]util.ValidatorConfig)
 	tokenAddresses := make(map[string]util.TokenConfig)
@@ -202,25 +204,22 @@ func main() {
 		panic(err)
 	}
 
-	if metadata == nil {
-		metadata = &bridge_pb.Metadata{
-			LastEthereumBlockParsed: ethBlockStart,
-			LastKoinosBlockParsed:   koinosBlockStart,
-		}
-		metadataStore.Put(metadata)
+	if ethBlockStart > 0 {
+		metadata.LastEthereumBlockParsed = ethBlockStart - 1
 	}
 
-	log.Infof("LastEthereumBlockParsed %s", metadata.LastEthereumBlockParsed)
-	log.Infof("LastKoinosBlockParsed %s", metadata.LastKoinosBlockParsed)
+	if koinosBlockStart > 0 {
+		metadata.LastKoinosBlockParsed = koinosBlockStart - 1
+	}
+
+	log.Infof("LastEthereumBlockParsed: %d", metadata.LastEthereumBlockParsed)
+	log.Infof("LastKoinosBlockParsed: %d", metadata.LastKoinosBlockParsed)
 
 	// blockchains streaming
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ethMaxBlocksToStreamU64, _ := strconv.ParseUint(ethMaxBlocksToStream, 0, 64)
-	koinosMaxBlocksToStreamU64, _ := strconv.ParseUint(koinosMaxBlocksToStream, 0, 64)
-
-	if ethMaxBlocksToStreamU64 > 0 {
+	if ethMaxBlocksToStream > 0 {
 		go streamer.StreamEthereumBlocks(
 			ctx,
 			metadataStore,
@@ -237,10 +236,11 @@ func main() {
 			signaturesExpiration,
 			validators,
 			ethConfirmations,
+			ethPollingTime,
 		)
 	}
 
-	if koinosMaxBlocksToStreamU64 > 0 {
+	if koinosMaxBlocksToStream > 0 {
 		go streamer.StreamKoinosBlocks(
 			ctx,
 			metadataStore,
@@ -258,6 +258,7 @@ func main() {
 			koinosTxStore,
 			signaturesExpiration,
 			validators,
+			koinosPollingTime,
 		)
 	}
 

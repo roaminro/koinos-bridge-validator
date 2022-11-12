@@ -26,12 +26,12 @@ import (
 func StreamKoinosBlocks(
 	ctx context.Context,
 	metadataStore *store.MetadataStore,
-	savedLastKoinosBlockParsed string,
+	startBlock uint64,
 	koinosRPC string,
 	ethereumPK *ecdsa.PrivateKey,
 	ethereumAddress string,
 	ethContractStr string,
-	koinosMaxBlocksToStreamStr string,
+	koinosMaxBlocksToStream uint64,
 	koinosPK []byte,
 	koinosAddress string,
 	koinosContractStr string,
@@ -40,24 +40,13 @@ func StreamKoinosBlocks(
 	koinosTxStore *store.TransactionsStore,
 	signaturesExpiration uint,
 	validators map[string]util.ValidatorConfig,
+	koinosPollingTime uint,
 ) {
 	// init JSON RPC client
 	rpcCl := kjsonrpc.NewKoinosRPCClient(koinosRPC)
 	rpcClient := rpc.NewJsonRPC(rpcCl)
 
 	fmt.Println("connected to Koinos RPC")
-
-	koinosMaxBlocksToStream, err := strconv.ParseUint(koinosMaxBlocksToStreamStr, 0, 64)
-	if err != nil {
-		log.Error(err.Error())
-		panic(err)
-	}
-
-	startBlock, err := strconv.ParseUint(savedLastKoinosBlockParsed, 0, 64)
-	if err != nil {
-		log.Error(err.Error())
-		panic(err)
-	}
 
 	startBlock++
 
@@ -84,12 +73,12 @@ func StreamKoinosBlocks(
 				panic(err)
 			}
 
-			metadata.LastKoinosBlockParsed = strconv.FormatUint(lastKoinosBlockParsed, 10)
+			metadata.LastKoinosBlockParsed = lastKoinosBlockParsed
 
 			metadataStore.Put(metadata)
 			return
 
-		case <-time.After(time.Millisecond * 1000):
+		case <-time.After(time.Millisecond * time.Duration(koinosPollingTime)):
 			headInfo, err := rpcClient.GetHeadInfo(ctx)
 
 			if err != nil {
