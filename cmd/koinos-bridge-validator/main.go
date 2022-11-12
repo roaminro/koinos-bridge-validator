@@ -217,7 +217,7 @@ func main() {
 	log.Infof("LastKoinosBlockParsed: %d", metadata.LastKoinosBlockParsed)
 
 	// blockchains streaming
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	var wg sync.WaitGroup
@@ -226,7 +226,7 @@ func main() {
 		wg.Add(1)
 		go streamer.StreamEthereumBlocks(
 			&wg,
-			ctx,
+			mainCtx,
 			metadataStore,
 			metadata.LastEthereumBlockParsed,
 			ethRPC,
@@ -249,7 +249,7 @@ func main() {
 		wg.Add(1)
 		go streamer.StreamKoinosBlocks(
 			&wg,
-			ctx,
+			mainCtx,
 			metadataStore,
 			metadata.LastKoinosBlockParsed,
 			koinosRPC,
@@ -270,20 +270,35 @@ func main() {
 	}
 
 	// Run API server
-	go func() {
-		api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators, koinosAddress, ethAddress)
-		mux := http.NewServeMux()
-		mux.HandleFunc("/GetEthereumTransaction", api.GetEthereumTransaction)
-		mux.HandleFunc("/GetKoinosTransaction", api.GetKoinosTransaction)
-		mux.HandleFunc("/SubmitSignature", api.SubmitSignature)
+	api := api.NewApi(ethTxStore, koinosTxStore, koinosContract, ethContract, validators, koinosAddress, ethAddress)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/GetEthereumTransaction", api.GetEthereumTransaction)
+	mux.HandleFunc("/GetKoinosTransaction", api.GetKoinosTransaction)
+	mux.HandleFunc("/SubmitSignature", api.SubmitSignature)
 
-		httpServer := &http.Server{
-			Addr:        apiUrl,
-			Handler:     mux,
-			BaseContext: func(_ net.Listener) context.Context { return ctx },
-		}
+	httpServer := &http.Server{
+		Addr:        apiUrl,
+		Handler:     mux,
+		BaseContext: func(_ net.Listener) context.Context { return mainCtx },
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Infof("starting HTTP server listener at %s", apiUrl)
+
 		if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Errorf("HTTP server ListenAndServe: %v", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-mainCtx.Done()
+		log.Info("stopping HTTP server")
+		if err := httpServer.Shutdown(context.Background()); err != nil {
+			log.Errorf("Server forced to shutdown: %s", err.Error())
 		}
 	}()
 
