@@ -79,11 +79,13 @@ func InitYamlConfig(baseDir string) *YamlConfig {
 	if _, err := os.Stat(yamlConfigPath); err == nil {
 		data, err := ioutil.ReadFile(yamlConfigPath)
 		if err != nil {
+			log.Error(err.Error())
 			panic(err)
 		}
 
 		err = yaml.Unmarshal(data, &yamlConfig)
 		if err != nil {
+			log.Error(err.Error())
 			panic(err)
 		}
 	}
@@ -97,6 +99,7 @@ func SignKoinosHash(key []byte, hash []byte) []byte {
 	// Sign the hash
 	signatureBytes, err := btcec.SignCompact(btcec.S256(), privateKey, hash, true)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -107,6 +110,7 @@ func SignEthereumHash(key *ecdsa.PrivateKey, hash []byte) []byte {
 	signatureBytes, err := crypto.Sign(hash, key)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	signatureBytes[crypto.RecoveryIDOffset] += 27
@@ -256,6 +260,7 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 func GenerateEthereumCompleteTransferHash(txIdBytes []byte, operationId uint64, ethToken []byte, recipient []byte, amountStr string, ethContractAddress common.Address, expiration uint64) (common.Hash, common.Hash) {
 	amount, err := strconv.ParseUint(amountStr, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	hash := crypto.Keccak256Hash(

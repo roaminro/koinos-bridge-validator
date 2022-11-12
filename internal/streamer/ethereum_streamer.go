@@ -86,6 +86,7 @@ func StreamEthereumBlocks(
 	tokensLockedEventAbi, err := abi.JSON(strings.NewReader(tokensLockedEventAbiStr))
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -113,6 +114,7 @@ func StreamEthereumBlocks(
 	transferCompletedEventAbi, err := abi.JSON(strings.NewReader(transferCompletedEventAbiStr))
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -140,12 +142,14 @@ func StreamEthereumBlocks(
 	requestNewSignaturesEventAbi, err := abi.JSON(strings.NewReader(requestNewSignaturesEventAbiStr))
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
 	ethCl, err := ethclient.Dial(ethRPC)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -155,16 +159,19 @@ func StreamEthereumBlocks(
 
 	ethMaxBlocksToStream, err := strconv.ParseUint(ethMaxBlocksToStreamStr, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
 	startBlock, err := strconv.ParseUint(savedLastEthereumBlockParsed, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
 	ethConfirmations, err := strconv.ParseUint(ethConfirmationsStr, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -173,6 +180,7 @@ func StreamEthereumBlocks(
 	ethContractAddr := common.HexToAddress(ethContractStr)
 	koinosContractAddr, err := base58.Decode(koinosContractStr)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -188,6 +196,7 @@ func StreamEthereumBlocks(
 
 			metadata, err := metadataStore.Get()
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -202,6 +211,7 @@ func StreamEthereumBlocks(
 			latestblock = latestblock - ethConfirmations
 
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -238,6 +248,7 @@ func StreamEthereumBlocks(
 
 				logs, err := ethCl.FilterLogs(ctx, query)
 				if err != nil {
+					log.Error(err.Error())
 					panic(err)
 				}
 
@@ -317,6 +328,7 @@ func processEthereumRequestNewSignaturesEvent(
 
 	err := eventAbi.UnpackIntoInterface(&event, "RequestNewSignaturesEvent", vLog.Data)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -331,6 +343,7 @@ func processEthereumRequestNewSignaturesEvent(
 	ethTxStore.Lock()
 	ethTx, err := ethTxStore.Get(transactionId)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -342,16 +355,19 @@ func processEthereumRequestNewSignaturesEvent(
 			txId := common.FromHex(ethTx.Id)
 			koinosToken, err := base58.Decode(ethTx.KoinosToken)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
 			recipient, err := base58.Decode(ethTx.Recipient)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
 			amount, err := strconv.ParseUint(ethTx.Amount, 0, 64)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -367,6 +383,7 @@ func processEthereumRequestNewSignaturesEvent(
 
 			completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -412,6 +429,7 @@ func processEthereumRequestNewSignaturesEvent(
 			err = ethTxStore.Put(transactionId, ethTx)
 
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -425,6 +443,7 @@ func processEthereumRequestNewSignaturesEvent(
 
 			ethTx, err = ethTxStore.Get(transactionId)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -450,6 +469,7 @@ func processEthereumRequestNewSignaturesEvent(
 			err = ethTxStore.Put(transactionId, ethTx)
 
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -477,6 +497,7 @@ func processEthereumTransferCompletedEvent(
 
 	err := eventAbi.UnpackIntoInterface(&event, "TransferCompletedEvent", vLog.Data)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -491,6 +512,7 @@ func processEthereumTransferCompletedEvent(
 	koinosTxStore.Lock()
 	koinosTx, err := koinosTxStore.Get(txKey)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -505,6 +527,7 @@ func processEthereumTransferCompletedEvent(
 
 	err = koinosTxStore.Put(txKey, koinosTx)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	koinosTxStore.Unlock()
@@ -532,6 +555,7 @@ func processEthereumTokensLockedEvent(
 
 	err := eventAbi.UnpackIntoInterface(&event, "TokensLockedEvent", vLog.Data)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -545,11 +569,13 @@ func processEthereumTokensLockedEvent(
 
 	koinosToken, err := base58.Decode(tokenAddresses[ethToken].KoinosAddress)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
 	recipient, err := base58.Decode(event.Recipient)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -570,6 +596,7 @@ func processEthereumTokensLockedEvent(
 
 	completeTransferHashBytes, err := proto.Marshal(completeTransferHash)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -584,6 +611,7 @@ func processEthereumTokensLockedEvent(
 
 	ethTx, err := ethTxStore.Get(txIdHex)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -619,6 +647,7 @@ func processEthereumTokensLockedEvent(
 	err = ethTxStore.Put(txIdHex, ethTx)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -632,6 +661,7 @@ func processEthereumTokensLockedEvent(
 
 	ethTx, err = ethTxStore.Get(txIdHex)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -657,6 +687,7 @@ func processEthereumTokensLockedEvent(
 	err = ethTxStore.Put(txIdHex, ethTx)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 

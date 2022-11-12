@@ -49,11 +49,13 @@ func StreamKoinosBlocks(
 
 	koinosMaxBlocksToStream, err := strconv.ParseUint(koinosMaxBlocksToStreamStr, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
 	startBlock, err := strconv.ParseUint(savedLastKoinosBlockParsed, 0, 64)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -62,6 +64,7 @@ func StreamKoinosBlocks(
 	ethContractAddr := common.HexToAddress(ethContractStr)
 	koinosContractAddr, err := base58.Decode(koinosContractStr)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -77,6 +80,7 @@ func StreamKoinosBlocks(
 
 			metadata, err := metadataStore.Get()
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -90,6 +94,7 @@ func StreamKoinosBlocks(
 
 			if err != nil {
 				if !strings.Contains(err.Error(), "context canceled") {
+					log.Error(err.Error())
 					panic(err)
 				}
 			} else {
@@ -113,6 +118,7 @@ func StreamKoinosBlocks(
 					if err != nil {
 						log.Error(err.Error())
 						if !strings.Contains(err.Error(), "context canceled") {
+							log.Error(err.Error())
 							panic(err)
 						}
 					} else {
@@ -200,6 +206,7 @@ func processRequestNewSignaturesEvent(
 
 	err := proto.Unmarshal(event.Data, requestNewSignaturesEvent)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -219,6 +226,7 @@ func processRequestNewSignaturesEvent(
 	koinosTxStore.Lock()
 	koinosTx, err := koinosTxStore.Get(txKey)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -232,6 +240,7 @@ func processRequestNewSignaturesEvent(
 			txId := common.FromHex(koinosTx.Id)
 			opId, err := strconv.ParseUint(koinosTx.OpId, 0, 64)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -277,6 +286,7 @@ func processRequestNewSignaturesEvent(
 			err = koinosTxStore.Put(txKey, koinosTx)
 
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -297,6 +307,7 @@ func processRequestNewSignaturesEvent(
 
 			koinosTx, err = koinosTxStore.Get(txKey)
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -322,6 +333,7 @@ func processRequestNewSignaturesEvent(
 			err = koinosTxStore.Put(txKey, koinosTx)
 
 			if err != nil {
+				log.Error(err.Error())
 				panic(err)
 			}
 
@@ -347,6 +359,7 @@ func processKoinosTransferCompletedEvent(
 
 	err := proto.Unmarshal(event.Data, transferCompletedEvent)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -360,6 +373,7 @@ func processKoinosTransferCompletedEvent(
 	ethTxStore.Lock()
 	ethTx, err := ethTxStore.Get(ethTxId)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -374,6 +388,7 @@ func processKoinosTransferCompletedEvent(
 
 	err = ethTxStore.Put(ethTxId, ethTx)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	ethTxStore.Unlock()
@@ -397,6 +412,7 @@ func processKoinosTokensLockedEvent(
 
 	err := proto.Unmarshal(event.Data, tokensLockedEvent)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -430,6 +446,7 @@ func processKoinosTokensLockedEvent(
 	txKey := txIdHex + "-" + operationIdStr
 	koinosTx, err := koinosTxStore.Get(txKey)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -467,6 +484,7 @@ func processKoinosTokensLockedEvent(
 	err = koinosTxStore.Put(txKey, koinosTx)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -487,6 +505,7 @@ func processKoinosTokensLockedEvent(
 
 	koinosTx, err = koinosTxStore.Get(txKey)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -513,6 +532,7 @@ func processKoinosTokensLockedEvent(
 	err = koinosTxStore.Put(txKey, koinosTx)
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 

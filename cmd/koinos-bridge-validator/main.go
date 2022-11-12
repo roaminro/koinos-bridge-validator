@@ -115,6 +115,7 @@ func main() {
 	// keys management
 	koinosPKbytes, err := koinosUtil.DecodeWIF(koinosPK)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -122,12 +123,14 @@ func main() {
 	koinosAddress := base58.Encode(koinosKey.AddressBytes())
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	log.Infof("Node koinosAddress %s", koinosAddress)
 
 	ethPrivateKey, err := crypto.HexToECDSA(ethPK)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 	ethAddress := crypto.PubkeyToAddress(ethPrivateKey.PublicKey).Hex()
@@ -174,16 +177,19 @@ func main() {
 		log.Info("Resetting database")
 		err := metadataDbBackend.Reset()
 		if err != nil {
+			log.Error(err.Error())
 			panic(fmt.Sprintf("Error resetting metadata database: %s\n", err.Error()))
 		}
 
 		ethDbBackend.Reset()
 		if err != nil {
+			log.Error(err.Error())
 			panic(fmt.Sprintf("Error resetting ethereum transactions database: %s\n", err.Error()))
 		}
 
 		koinosDbBackend.Reset()
 		if err != nil {
+			log.Error(err.Error())
 			panic(fmt.Sprintf("Error resetting koinos transactions database: %s\n", err.Error()))
 		}
 	}
@@ -192,6 +198,7 @@ func main() {
 	metadata, err := metadataStore.Get()
 
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 

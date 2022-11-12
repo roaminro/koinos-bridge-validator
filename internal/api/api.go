@@ -35,6 +35,7 @@ func NewApi(ethTxStore *store.TransactionsStore, koinosTxStore *store.Transactio
 
 	koinosContractAddress, err := base58.Decode(koinosContractStr)
 	if err != nil {
+		log.Error(err.Error())
 		panic(err)
 	}
 
@@ -387,6 +388,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 
 		operationId, err := strconv.ParseUint(submittedSignature.Transaction.OpId, 0, 64)
 		if err != nil {
+			log.Error(err.Error())
 			panic(err)
 		}
 
