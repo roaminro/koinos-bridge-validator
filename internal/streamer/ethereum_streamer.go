@@ -339,7 +339,7 @@ func processEthereumRequestNewSignaturesEvent(
 		allowedRequestNewSignaturesBlockTime := ethTx.Expiration + uint64(signaturesExpiration)
 
 		if blocktime >= allowedRequestNewSignaturesBlockTime {
-			txId := common.Hex2Bytes(ethTx.Id)
+			txId := common.FromHex(ethTx.Id)
 			koinosToken, err := base58.Decode(ethTx.KoinosToken)
 			if err != nil {
 				panic(err)
@@ -454,12 +454,14 @@ func processEthereumRequestNewSignaturesEvent(
 			}
 
 			ethTxStore.Unlock()
+		} else {
+			log.Infof("Cannot request new signatures for Eth tx %s yet (current blocktime %d vs allowed blocktime %d)", transactionId, blocktime, allowedRequestNewSignaturesBlockTime)
+			ethTxStore.Unlock()
 		}
 	} else {
 		log.Infof("Eth tx %s does not exist or is already completed", transactionId)
+		ethTxStore.Unlock()
 	}
-
-	ethTxStore.Unlock()
 }
 
 func processEthereumTransferCompletedEvent(

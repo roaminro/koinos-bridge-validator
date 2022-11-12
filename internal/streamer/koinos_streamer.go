@@ -119,7 +119,6 @@ func StreamKoinosBlocks(
 						log.Infof("fetched koinos blocks: %d - %d", fromBlock, toBlock)
 
 						for _, block := range blocks.BlockItems {
-							log.Infof("block#: %d", block.BlockHeight)
 							for _, receipt := range block.Receipt.TransactionReceipts {
 								// make the sure the transaction did not revert
 								if !receipt.Reverted {
@@ -230,7 +229,7 @@ func processRequestNewSignaturesEvent(
 		if blocktime >= allowedRequestNewSignaturesBlockTime {
 			ethereumToken := common.HexToAddress(koinosTx.EthToken)
 			recipient := common.HexToAddress(koinosTx.Recipient)
-			txId := common.Hex2Bytes(koinosTx.Id)
+			txId := common.FromHex(koinosTx.Id)
 			opId, err := strconv.ParseUint(koinosTx.OpId, 0, 64)
 			if err != nil {
 				panic(err)
@@ -327,13 +326,14 @@ func processRequestNewSignaturesEvent(
 			}
 
 			koinosTxStore.Unlock()
+		} else {
+			log.Infof("Cannot request new signatures for Koinos tx %s / op id %s yet (current blocktime %d vs allowed blocktime %d)", transactionId, operationId, blocktime, allowedRequestNewSignaturesBlockTime)
+			koinosTxStore.Unlock()
 		}
 	} else {
 		log.Infof("Koinos tx %s does not exist or is already completed", txKey)
+		koinosTxStore.Unlock()
 	}
-
-	koinosTxStore.Unlock()
-
 }
 
 func processKoinosTransferCompletedEvent(

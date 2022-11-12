@@ -235,16 +235,16 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 			continue
 		}
 
-		log.Infof("broadcast %s: status code %d for tx %s\n", validator.KoinosAddress, res.StatusCode, tx.Id)
-
+		log.Debugf("broadcast %s: status code %d for tx %s\n", validator.KoinosAddress, res.StatusCode, tx.Id)
+		bodyBytes, _ := ioutil.ReadAll(res.Body)
+		body := string(bodyBytes)
 		if res.StatusCode == http.StatusOK {
-			signatureBytes, _ := ioutil.ReadAll(res.Body)
-			signature := string(signatureBytes)
-
-			if signature != "" {
-				log.Infof("client: received signature %s\n", signatureBytes)
-				signatures[validator.KoinosAddress] = signature
+			if body != "" {
+				log.Debugf("client: received signature %s\n", body)
+				signatures[validator.KoinosAddress] = body
 			}
+		} else {
+			log.Warnf("client: received error %s\n", body)
 		}
 
 		processedApiUrls[validator.ApiUrl] = true

@@ -192,7 +192,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if submittedSignature.Transaction.Type == bridge_pb.TransactionType_ethereum {
-		log.Infof("received Ethereum tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
+		log.Debugf("received Ethereum tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
 		// check transaction hash
 		txIdBytes := common.FromHex(submittedSignature.Transaction.Id)
 
@@ -365,7 +365,7 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if submittedSignature.Transaction.Type == bridge_pb.TransactionType_koinos {
-		log.Infof("received Koinos tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
+		log.Debugf("received Koinos tx %s / validators: %+q / signatures: %+q", submittedSignature.Transaction.Id, submittedSignature.Transaction.Validators, submittedSignature.Transaction.Signatures)
 		// check transaction hash
 		txIdBytes := common.FromHex(submittedSignature.Transaction.Id)
 
