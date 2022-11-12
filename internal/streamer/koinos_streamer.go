@@ -414,7 +414,7 @@ func processKoinosTokensLockedEvent(
 
 	ethereumToken := common.HexToAddress(tokenAddresses[koinosToken].EthereumAddress)
 
-	log.Infof("new Koinos tokens_locked_event | block: %s | tx: %s | op_id: %s | Koinos token: %s | Ethereum token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, operationIdStr, koinosToken, tokenAddresses[koinosToken].EthereumAddress, from, tokensLockedEvent.Recipient, amountStr)
+	log.Infof("new Koinos tokens_locked_event | block: %d | tx: %s | op_id: %s | Koinos token: %s | Ethereum token: %s | From: %s | recipient: %s | amount: %s ", blockNumber, txIdHex, operationIdStr, koinosToken, tokenAddresses[koinosToken].EthereumAddress, from, tokensLockedEvent.Recipient, amountStr)
 
 	expiration := blocktime + uint64(signaturesExpiration)
 
