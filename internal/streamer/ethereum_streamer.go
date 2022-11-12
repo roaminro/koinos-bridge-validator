@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -28,6 +29,7 @@ import (
 )
 
 func StreamEthereumBlocks(
+	wg *sync.WaitGroup,
 	ctx context.Context,
 	metadataStore *store.MetadataStore,
 	startBlock uint64,
@@ -45,6 +47,7 @@ func StreamEthereumBlocks(
 	ethConfirmations uint64,
 	ethPollingTime uint,
 ) {
+	defer wg.Done()
 	tokensLockedEventTopic := crypto.Keccak256Hash([]byte("TokensLockedEvent(address,address,uint256,string,uint256)"))
 	tokensLockedEventAbiStr := `[{
 		"anonymous": false,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -24,6 +25,7 @@ import (
 )
 
 func StreamKoinosBlocks(
+	wg *sync.WaitGroup,
 	ctx context.Context,
 	metadataStore *store.MetadataStore,
 	startBlock uint64,
@@ -42,6 +44,7 @@ func StreamKoinosBlocks(
 	validators map[string]util.ValidatorConfig,
 	koinosPollingTime uint,
 ) {
+	defer wg.Done()
 	// init JSON RPC client
 	rpcCl := kjsonrpc.NewKoinosRPCClient(koinosRPC)
 	rpcClient := rpc.NewJsonRPC(rpcCl)

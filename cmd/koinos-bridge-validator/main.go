@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"sync"
 	"syscall"
 
 	"github.com/dgraph-io/badger/v3"
@@ -216,11 +217,15 @@ func main() {
 	log.Infof("LastKoinosBlockParsed: %d", metadata.LastKoinosBlockParsed)
 
 	// blockchains streaming
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
 
 	if ethMaxBlocksToStream > 0 {
+		wg.Add(1)
 		go streamer.StreamEthereumBlocks(
+			&wg,
 			ctx,
 			metadataStore,
 			metadata.LastEthereumBlockParsed,
@@ -241,7 +246,9 @@ func main() {
 	}
 
 	if koinosMaxBlocksToStream > 0 {
+		wg.Add(1)
 		go streamer.StreamKoinosBlocks(
+			&wg,
 			ctx,
 			metadataStore,
 			metadata.LastKoinosBlockParsed,
@@ -280,11 +287,6 @@ func main() {
 		}
 	}()
 
-	// Wait for a SIGINT or SIGTERM signal
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-	log.Info("closing service gracefully")
-	cancel()
+	wg.Wait()
 	log.Info("graceful stop completed")
 }
