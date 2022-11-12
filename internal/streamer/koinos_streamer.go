@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -57,7 +56,7 @@ func StreamKoinosBlocks(
 	koinosContractAddr, err := base58.Decode(koinosContractStr)
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	var lastKoinosBlockParsed uint64
@@ -73,22 +72,19 @@ func StreamKoinosBlocks(
 			metadata, err := metadataStore.Get()
 			if err != nil {
 				log.Error(err.Error())
-				panic(err)
+				return
 			}
 
 			metadata.LastKoinosBlockParsed = lastKoinosBlockParsed
-
 			metadataStore.Put(metadata)
+
 			return
 
 		case <-time.After(time.Millisecond * time.Duration(koinosPollingTime)):
 			headInfo, err := rpcClient.GetHeadInfo(ctx)
 
 			if err != nil {
-				if !strings.Contains(err.Error(), "context canceled") {
-					log.Error(err.Error())
-					panic(err)
-				}
+				log.Error(err.Error())
 			} else {
 				log.Infof("last irreversible block: %d", headInfo.LastIrreversibleBlock)
 
@@ -109,10 +105,6 @@ func StreamKoinosBlocks(
 					blocks, err := rpcClient.GetBlocksByHeight(ctx, headInfo.HeadTopology.Id, fromBlock, uint32(nbBlocksToFetch))
 					if err != nil {
 						log.Error(err.Error())
-						if !strings.Contains(err.Error(), "context canceled") {
-							log.Error(err.Error())
-							panic(err)
-						}
 					} else {
 						log.Infof("fetched koinos blocks: %d - %d", fromBlock, toBlock)
 

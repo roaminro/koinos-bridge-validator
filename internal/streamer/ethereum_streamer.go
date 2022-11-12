@@ -91,7 +91,7 @@ func StreamEthereumBlocks(
 
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	transferCompletedEventTopic := crypto.Keccak256Hash([]byte("TransferCompletedEvent(bytes,uint256)"))
@@ -119,7 +119,7 @@ func StreamEthereumBlocks(
 
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	requestNewSignaturesEventTopic := crypto.Keccak256Hash([]byte("RequestNewSignaturesEvent(bytes,uint256)"))
@@ -147,14 +147,14 @@ func StreamEthereumBlocks(
 
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	ethCl, err := ethclient.Dial(ethRPC)
 
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	defer ethCl.Close()
@@ -167,7 +167,7 @@ func StreamEthereumBlocks(
 	koinosContractAddr, err := base58.Decode(koinosContractStr)
 	if err != nil {
 		log.Error(err.Error())
-		panic(err)
+		return
 	}
 
 	var lastEthereumBlockParsed uint64
@@ -183,7 +183,7 @@ func StreamEthereumBlocks(
 			metadata, err := metadataStore.Get()
 			if err != nil {
 				log.Error(err.Error())
-				panic(err)
+				return
 			}
 
 			metadata.LastEthereumBlockParsed = lastEthereumBlockParsed
@@ -196,101 +196,100 @@ func StreamEthereumBlocks(
 
 			if err != nil {
 				log.Error(err.Error())
-				panic(err)
-			}
-
-			// trail by ethConfirmations blocks
-			latestblock = latestblock - ethConfirmations
-
-			log.Infof("latestblock: %d", latestblock)
-
-			var blockDelta uint64 = 0
-
-			if latestblock > fromBlock {
-				blockDelta = latestblock - fromBlock
-			}
-
-			var toBlock = fromBlock + blockDelta
-
-			if blockDelta > ethMaxBlocksToStream {
-				toBlock = fromBlock + ethMaxBlocksToStream
-			}
-
-			if toBlock <= latestblock {
-				query := ethereum.FilterQuery{
-					FromBlock: big.NewInt(int64(fromBlock)),
-					ToBlock:   big.NewInt(int64(toBlock)),
-					Addresses: []common.Address{
-						ethContractAddr,
-					},
-					Topics: [][]common.Hash{
-						{
-							tokensLockedEventTopic,
-							transferCompletedEventTopic,
-							requestNewSignaturesEventTopic,
-						},
-					},
-				}
-				log.Infof("fetched eth logs: %d - %d", fromBlock, toBlock)
-
-				logs, err := ethCl.FilterLogs(ctx, query)
-				if err != nil {
-					log.Error(err.Error())
-					panic(err)
-				}
-
-				for _, vLog := range logs {
-					// do not processed removed logs
-					if vLog.Removed {
-						continue
-					}
-
-					if vLog.Topics[0] == tokensLockedEventTopic {
-						// if TokensLockedEvent
-						processEthereumTokensLockedEvent(
-							koinosPK,
-							koinosAddress,
-							koinosContractAddr,
-							tokenAddresses,
-							ethTxStore,
-							signaturesExpiration,
-							validators,
-							vLog,
-							tokensLockedEventAbi,
-						)
-					} else if vLog.Topics[0] == transferCompletedEventTopic {
-						// if TransferCompletedEvenet
-						processEthereumTransferCompletedEvent(
-							koinosTxStore,
-							vLog,
-							transferCompletedEventAbi,
-						)
-					} else if vLog.Topics[0] == requestNewSignaturesEventTopic {
-						// if RequestNewSignaturesEvent
-						processEthereumRequestNewSignaturesEvent(
-							koinosPK,
-							koinosAddress,
-							koinosContractAddr,
-							tokenAddresses,
-							ethTxStore,
-							signaturesExpiration,
-							validators,
-							vLog,
-							requestNewSignaturesEventAbi,
-						)
-					}
-
-					lastEthereumBlockParsed = vLog.BlockNumber
-				}
-
-				if len(logs) == 0 {
-					// if no logs available
-					fromBlock = toBlock + 1
-				} else {
-					fromBlock = lastEthereumBlockParsed + 1
-				}
 			} else {
-				log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
+				// trail by ethConfirmations blocks
+				latestblock = latestblock - ethConfirmations
+
+				log.Infof("latestblock: %d", latestblock)
+
+				var blockDelta uint64 = 0
+
+				if latestblock > fromBlock {
+					blockDelta = latestblock - fromBlock
+				}
+
+				var toBlock = fromBlock + blockDelta
+
+				if blockDelta > ethMaxBlocksToStream {
+					toBlock = fromBlock + ethMaxBlocksToStream
+				}
+
+				if toBlock <= latestblock {
+					query := ethereum.FilterQuery{
+						FromBlock: big.NewInt(int64(fromBlock)),
+						ToBlock:   big.NewInt(int64(toBlock)),
+						Addresses: []common.Address{
+							ethContractAddr,
+						},
+						Topics: [][]common.Hash{
+							{
+								tokensLockedEventTopic,
+								transferCompletedEventTopic,
+								requestNewSignaturesEventTopic,
+							},
+						},
+					}
+					log.Infof("fetched eth logs: %d - %d", fromBlock, toBlock)
+
+					logs, err := ethCl.FilterLogs(ctx, query)
+					if err != nil {
+						log.Error(err.Error())
+					} else {
+
+						for _, vLog := range logs {
+							// do not processed removed logs
+							if vLog.Removed {
+								continue
+							}
+
+							if vLog.Topics[0] == tokensLockedEventTopic {
+								// if TokensLockedEvent
+								processEthereumTokensLockedEvent(
+									koinosPK,
+									koinosAddress,
+									koinosContractAddr,
+									tokenAddresses,
+									ethTxStore,
+									signaturesExpiration,
+									validators,
+									vLog,
+									tokensLockedEventAbi,
+								)
+							} else if vLog.Topics[0] == transferCompletedEventTopic {
+								// if TransferCompletedEvenet
+								processEthereumTransferCompletedEvent(
+									koinosTxStore,
+									vLog,
+									transferCompletedEventAbi,
+								)
+							} else if vLog.Topics[0] == requestNewSignaturesEventTopic {
+								// if RequestNewSignaturesEvent
+								processEthereumRequestNewSignaturesEvent(
+									koinosPK,
+									koinosAddress,
+									koinosContractAddr,
+									tokenAddresses,
+									ethTxStore,
+									signaturesExpiration,
+									validators,
+									vLog,
+									requestNewSignaturesEventAbi,
+								)
+							}
+
+							lastEthereumBlockParsed = vLog.BlockNumber
+						}
+
+						if len(logs) == 0 {
+							// if no logs available
+							fromBlock = toBlock + 1
+						} else {
+							fromBlock = lastEthereumBlockParsed + 1
+						}
+					}
+				} else {
+					log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
+				}
 			}
 		}
 	}
