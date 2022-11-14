@@ -201,13 +201,20 @@ func BroadcastTransaction(tx *bridge_pb.Transaction, koinosPK []byte, koinosAddr
 		return nil, err
 	}
 
-	hash := sha256.Sum256(txBytes)
+	// expiration is now + 1 min
+	expiration := time.Now().UnixMilli() + 60000
+	expirationBytes := []byte(strconv.FormatInt(expiration, 10))
+
+	bytesToHash := append(txBytes, expirationBytes...)
+
+	hash := sha256.Sum256(bytesToHash)
 	sigBytes := SignKoinosHash(koinosPK, hash[:])
 	sigB64 := base64.URLEncoding.EncodeToString(sigBytes)
 
 	submittedSignature := &bridge_pb.SubmittedSignature{
 		Transaction: tx,
 		Signature:   sigB64,
+		Expiration:  expiration,
 	}
 
 	submittedSignatureBytes, err := protojson.Marshal(submittedSignature)

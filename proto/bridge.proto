@@ -63,6 +63,7 @@ message complete_transfer_hash {
 message submitted_signature {
     transaction transaction = 1;
     string signature = 2;
+    int64 expiration = 3;
 }
 
 message tokens_locked_event {

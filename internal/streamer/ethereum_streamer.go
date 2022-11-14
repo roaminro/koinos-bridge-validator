@@ -197,10 +197,14 @@ func StreamEthereumBlocks(
 			if err != nil {
 				log.Error(err.Error())
 			} else {
-				// trail by ethConfirmations blocks
-				latestblock = latestblock - ethConfirmations
-
 				log.Infof("latestblock: %d", latestblock)
+
+				// trail by ethConfirmations blocks
+				if latestblock < ethConfirmations {
+					latestblock = 0
+				} else {
+					latestblock = latestblock - ethConfirmations
+				}
 
 				var blockDelta uint64 = 0
 
@@ -288,7 +292,7 @@ func StreamEthereumBlocks(
 						}
 					}
 				} else {
-					log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
+					log.Info("waiting for block: " + fmt.Sprint(fromBlock))
 				}
 			}
 		}

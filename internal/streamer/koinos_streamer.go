@@ -165,7 +165,7 @@ func StreamKoinosBlocks(
 						}
 					}
 				} else {
-					log.Info("waiting for new block: " + fmt.Sprint(fromBlock))
+					log.Info("waiting for block: " + fmt.Sprint(fromBlock))
 				}
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strconv"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	log "github.com/koinos/koinos-log-golang"
@@ -166,6 +167,14 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if time.Now().UnixMilli() > submittedSignature.Expiration {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("Expired signature"))
+		return
+	}
+
+	expirationBytes := []byte(strconv.FormatInt(submittedSignature.Expiration, 10))
+
 	transactionBytes, err := proto.Marshal(submittedSignature.Transaction)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -173,7 +182,9 @@ func (api *Api) SubmitSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash := sha256.Sum256(transactionBytes)
+	bytesToHash := append(transactionBytes, expirationBytes...)
+
+	hash := sha256.Sum256(bytesToHash)
 
 	signer, err := util.RecoverKoinosAddressFromSignature(submittedSignature.Signature, hash[:])
 	if err != nil {
