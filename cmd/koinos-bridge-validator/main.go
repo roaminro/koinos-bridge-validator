@@ -38,7 +38,7 @@ const (
 	ethRPCDefault               = "http://127.0.0.1:8545/"
 	ethBlockStartDefault        = 0
 	ethMaxBlocksToStreamDefault = 500
-	ethConfirmationsDefault     = 25
+	ethConfirmationsDefault     = 15
 	ethPollingTimeDefault       = 3000
 
 	koinosRPCDefault               = "http://127.0.0.1:8080/"
