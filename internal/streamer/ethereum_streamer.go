@@ -287,6 +287,7 @@ func StreamEthereumBlocks(
 						if len(logs) == 0 {
 							// if no logs available
 							fromBlock = toBlock + 1
+							lastEthereumBlockParsed = toBlock
 						} else {
 							fromBlock = lastEthereumBlockParsed + 1
 						}
