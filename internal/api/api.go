@@ -108,6 +108,8 @@ func (api *Api) GetKoinosTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// if no other bridge unrelated operations are present in the transaction
+	// the opId is 1 or 3
 	opId := "1"
 
 	if len(opIdParams) > 0 {
@@ -119,9 +121,20 @@ func (api *Api) GetKoinosTransaction(w http.ResponseWriter, r *http.Request) {
 	transaction, _ := api.koinosTxStore.Get(txKey)
 
 	if transaction == nil {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("transaction does not exist"))
-		return
+		if opId == "1" {
+			opId = "3"
+			txKey = transactionIdParams[0] + "-" + opId
+			transaction, _ = api.koinosTxStore.Get(txKey)
+			if transaction == nil {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("transaction does not exist"))
+				return
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("transaction does not exist"))
+			return
+		}
 	}
 
 	m := protojson.MarshalOptions{

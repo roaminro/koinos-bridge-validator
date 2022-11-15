@@ -214,6 +214,19 @@ func processRequestNewSignaturesEvent(
 		panic(err)
 	}
 
+	// if no other bridge unrelated operations are present in the transaction
+	// the opId is 1 or 3
+	if koinosTx == nil && operationId == "1" {
+		operationId = "3"
+		txKey = transactionId + "-" + operationId
+
+		koinosTx, err = koinosTxStore.Get(txKey)
+		if err != nil {
+			log.Error(err.Error())
+			panic(err)
+		}
+	}
+
 	if koinosTx != nil && koinosTx.Status != bridge_pb.TransactionStatus_completed {
 		// can only request signatures after 2x expiration time
 		allowedRequestNewSignaturesBlockTime := koinosTx.Expiration + uint64(signaturesExpiration)
