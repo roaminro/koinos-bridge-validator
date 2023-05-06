@@ -1,0 +1,19 @@
+---
+version: "3.9"
+services:
+  validator:
+    build: .
+    container_name: bridgekoin_validator
+    entrypoint:
+      ['/usr/local/bin/koinos_bridge', '-d', '/usr/local/bin']
+    volumes:
+      - ./config.yaml:/usr/local/bin/config.yaml:ro
+    restart: unless-stopped
+    networks:
+      - default
+    ports:
+      - 5005:5005
+networks:
+    web-network:
+        driver: bridge
+        external: true
