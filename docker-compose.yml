@@ -10,9 +10,10 @@ services:
       - ./config.yaml:/usr/local/bin/config.yaml:ro
     restart: unless-stopped
     networks:
-      - default
+      - web-network
     ports:
-      - 5005:5005
+      - ${PORTS}
+
 networks:
     web-network:
         driver: bridge

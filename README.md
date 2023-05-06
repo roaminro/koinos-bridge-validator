@@ -16,7 +16,11 @@ go run cmd/koinos-bridge-validator/main.go -d "$(pwd)/node_test"
 
 ### Docker Compose
 
-Set the correct ports in `config.yaml` and `docker-compose.yml`
+Set the correct ports in `config.yaml` and create a `.env` file that defines a PORTS variable which will be used in `docker-compose.yml`.
+
+```bash
+PORTS="5005:5005"
+```
 
 ### Validator Queries
 
